@@ -60,14 +60,6 @@ class DiskScheduler {
   // 通过 Schedule 启动一个写磁盘任务.
   void Schedule(DiskRequest r);
 
-  /**
-   * TODO(P1): Add implementation
-   *
-   * @brief Background worker thread function that processes scheduled requests.
-   *
-   * The background thread needs to process requests while the DiskScheduler exists, i.e., this function should not
-   * return until ~DiskScheduler() is called. At that point you need to make sure that the function does return.
-   */
   void StartWorkerThread();
 
   using DiskSchedulerPromise = std::promise<bool>;
