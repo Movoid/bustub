@@ -128,7 +128,9 @@ SKIPLIST_TEMPLATE_ARGUMENTS struct SkipList<K, Compare, MaxHeight, Seed>::SkipNo
    * @param height The number of links the node will have
    * @param key The key to store in the node (default empty for header)
    */
-  explicit SkipNode(size_t height, K key = K{}) { UNIMPLEMENTED("TODO(P0): Add implementation."); }
+  explicit SkipNode(size_t height, K key = K{}) : links_(height), key_{key} {
+    // UNIMPLEMENTED("TODO(P0): Add implementation.");
+  }
 
   auto Height() const -> size_t;
   auto Next(size_t level) const -> std::shared_ptr<SkipNode>;
