@@ -164,7 +164,9 @@ TEST(PageGuardTest, DISABLED_MoveTest) {
   ASSERT_EQ(1, bpm->GetPinCount(pid3));
 
   // This will hang if page 2 was not unlatched correctly.
-  { const auto temp_guard2 = bpm->WritePage(pid2); }
+  {
+    const auto temp_guard2 = bpm->WritePage(pid2);
+  }
 
   auto guard4 = bpm->WritePage(pid4);
   auto guard5 = bpm->WritePage(pid5);
@@ -187,7 +189,9 @@ TEST(PageGuardTest, DISABLED_MoveTest) {
   ASSERT_EQ(1, bpm->GetPinCount(pid5));
 
   // This will hang if page 4 was not unlatched correctly.
-  { const auto temp_guard4 = bpm->ReadPage(pid4); }
+  {
+    const auto temp_guard4 = bpm->ReadPage(pid4);
+  }
 
   // Test move constructor with invalid that
   {

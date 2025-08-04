@@ -255,9 +255,17 @@ add_custom_target(fix-clang-tidy-diff
 # check clang-tidy on the whole projects is slow, so we
 # hardcode some files to check here for each project.
 # ##########################################################
+# set(P0_FILES
+# "src/include/primer/skiplist.h"
+# "src/primer/skiplist.cpp"
+# )
+
+# Fall2024: Hyperloglog
 set(P0_FILES
-        "src/include/primer/skiplist.h"
-        "src/primer/skiplist.cpp"
+        "src/include/primer/hyperloglog_presto.h"
+        "src/include/primer/hyperloglog.h"
+        "src/primer/hyperloglog_presto.cpp"
+        "src/primer/hyperloglog.cpp"
 )
 
 add_custom_target(check-clang-tidy-p0
