@@ -61,13 +61,13 @@ class HyperLogLogPresto {
    *
    * @returns hash value
    */
-  inline auto CalculateHash(KeyType val) -> hash_t {
+  auto CalculateHash(KeyType val) -> hash_t {
     Value val_obj;
-    if constexpr (std::is_same<KeyType, std::string>::value) {
+    if constexpr (std::is_same_v<KeyType, std::string>) {
       val_obj = Value(VARCHAR, val);
       return bustub::HashUtil::HashValue(&val_obj);
     }
-    if constexpr (std::is_same<KeyType, int64_t>::value) {
+    if constexpr (std::is_same_v<KeyType, int64_t>) {
       return static_cast<hash_t>(val);
     }
     return 0;
@@ -83,6 +83,7 @@ class HyperLogLogPresto {
   uint64_t cardinality_;
 
   // TODO(student) - can add more data structures as required
+  uint16_t idx_bits_;
 };
 
 }  // namespace bustub
