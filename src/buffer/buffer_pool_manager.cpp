@@ -116,7 +116,9 @@ auto BufferPoolManager::Size() const -> size_t { return num_frames_; }
  *
  * @return The page ID of the newly allocated page.
  */
-auto BufferPoolManager::NewPage() -> page_id_t { UNIMPLEMENTED("TODO(P1): Add implementation."); }
+auto BufferPoolManager::NewPage() -> page_id_t {
+  UNIMPLEMENTED("TODO(P1): Add implementation.");
+}
 
 /**
  * @brief Removes a page from the database, both on disk and in memory.

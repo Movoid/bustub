@@ -18,9 +18,9 @@ namespace bustub {
 
 DiskScheduler::DiskScheduler(DiskManager *disk_manager) : disk_manager_(disk_manager) {
   // TODO(P1): remove this line after you have implemented the disk scheduler API
-  throw NotImplementedException(
-      "DiskScheduler is not implemented yet. If you have finished implementing the disk scheduler, please remove the "
-      "throw exception line in `disk_scheduler.cpp`.");
+  // throw NotImplementedException(
+  //     "DiskScheduler is not implemented yet. If you have finished implementing the disk scheduler, please remove the "
+  //     "throw exception line in `disk_scheduler.cpp`.");
 
   // Spawn the background thread
   background_thread_.emplace([&] { StartWorkerThread(); });
@@ -41,7 +41,9 @@ DiskScheduler::~DiskScheduler() {
  *
  * @param r The request to be scheduled.
  */
-void DiskScheduler::Schedule(DiskRequest r) {}
+void DiskScheduler::Schedule(DiskRequest r) {
+  request_queue_.Put(std::make_optional(std::move(r)));
+}
 
 /**
  * TODO(P1): Add implementation
@@ -51,6 +53,22 @@ void DiskScheduler::Schedule(DiskRequest r) {}
  * The background thread needs to process requests while the DiskScheduler exists, i.e., this function should not
  * return until ~DiskScheduler() is called. At that point you need to make sure that the function does return.
  */
-void DiskScheduler::StartWorkerThread() {}
+void DiskScheduler::StartWorkerThread() {
+  while (true) {
+    std::optional<DiskRequest> task{request_queue_.Get()};
+    if (task.has_value()) {
+      // call disk_manager to process the task.
+      auto& diskreq{task.value()};
+      if (task->is_write_) {
+        disk_manager_->WritePage(diskreq.page_id_, diskreq.data_);
+      } else {
+        disk_manager_->ReadPage(diskreq.page_id_, diskreq.data_);
+      }
+      diskreq.callback_.set_value(true);
+    } else {
+      break;
+    }
+  }
+}
 
 }  // namespace bustub

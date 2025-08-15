@@ -32,6 +32,7 @@ class FrameHeader;
  * With `ReadPageGuard`s, there can be multiple threads that share read access to a page's data. However, the existence
  * of any `ReadPageGuard` on a page implies that no thread can be mutating the page's data.
  */
+// 所有上层的磁盘 Page 读写都必须通过 R/W PageGuard 完成,
 class ReadPageGuard {
   /** @brief Only the buffer pool manager is allowed to construct a valid `ReadPageGuard.` */
   friend class BufferPoolManager;
@@ -54,6 +55,10 @@ class ReadPageGuard {
   auto operator=(const ReadPageGuard &) -> ReadPageGuard & = delete;
   ReadPageGuard(ReadPageGuard &&that) noexcept;
   auto operator=(ReadPageGuard &&that) noexcept -> ReadPageGuard &;
+
+  // 上层通过 page_id 获得一个 PageGuard,
+  // 对 page 所在 memory frame 进行直接操作.
+  // 多个线程同时操作同一个 frame 则需要加锁.
   auto GetPageId() const -> page_id_t;
   auto GetData() const -> const char *;
   template <class T>
@@ -94,6 +99,7 @@ class ReadPageGuard {
    * Since the buffer pool cannot know when this `ReadPageGuard` gets destructed, we maintain a pointer to the buffer
    * pool's latch for when we need to update the frame's eviction state in the buffer pool replacer.
    */
+  // BufferPool 的 latch
   std::shared_ptr<std::mutex> bpm_latch_;
 
   /**
