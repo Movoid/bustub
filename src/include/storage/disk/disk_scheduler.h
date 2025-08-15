@@ -24,6 +24,7 @@ namespace bustub {
 /**
  * @brief Represents a Write or Read request for the DiskManager to execute.
  */
+// 读写请求
 struct DiskRequest {
   /** Flag indicating whether the request is a write or a read. */
   bool is_write_;
@@ -33,10 +34,10 @@ struct DiskRequest {
    *   1. being read into from disk (on a read).
    *   2. being written out to disk (on a write).
    */
-  char *data_;
+  char *data_;  // memory 数据
 
   /** ID of the page being read from / written to disk. */
-  page_id_t page_id_;
+  page_id_t page_id_;  // 目标 disk page
 
   /** Callback used to signal to the request issuer when the request has been completed. */
   std::promise<bool> callback_;
@@ -54,13 +55,7 @@ class DiskScheduler {
   explicit DiskScheduler(DiskManager *disk_manager);
   ~DiskScheduler();
 
-  /**
-   * TODO(P1): Add implementation
-   *
-   * @brief Schedules a request for the DiskManager to execute.
-   *
-   * @param r The request to be scheduled.
-   */
+  // 通过 Schedule 启动一个写磁盘任务.
   void Schedule(DiskRequest r);
 
   /**
@@ -81,6 +76,8 @@ class DiskScheduler {
    *
    * @return std::promise<bool>
    */
+  // 这里 bustub 使用 promise/future 仅用于异步等待,
+  //  future 没有返回信息.
   auto CreatePromise() -> DiskSchedulerPromise { return {}; };
 
   /**

@@ -72,13 +72,24 @@ class FrameHeader {
   /** @brief The frame ID / index of the frame this header represents. */
   const frame_id_t frame_id_;
 
-  /** @brief The readers / writer latch for this frame. */
+  /** @brief The readers / writer latch for this frame.
+   *
+   * 对 frame 加锁, 在 PageGuard 构造时, 就应该上锁,
+   * PageGuard 析构时解锁.
+   * BufferPoolManager 不允许对此上锁.
+   *
+   */
   std::shared_mutex rwlatch_;
 
   /** @brief The number of pins on this frame keeping the page in memory. */
+  // 引用计数, 每个 PageGuard
   std::atomic<size_t> pin_count_;
 
-  /** @brief The dirty flag. */
+  /** @brief The dirty flag.
+   *
+   * dirty 标记, 写 frame 后需要标记, 在 frame evict 后需要 flush.
+   *
+   */
   bool is_dirty_;
 
   /**
@@ -86,6 +97,7 @@ class FrameHeader {
    *
    * If the frame does not hold any page data, the frame contains all null bytes.
    */
+  // memory frame 的实际数据
   std::vector<char> data_;
 
   /**
@@ -116,6 +128,9 @@ class BufferPoolManager {
   auto Size() const -> size_t;
   auto NewPage() -> page_id_t;
   auto DeletePage(page_id_t page_id) -> bool;
+
+  // 上层操作 BufferPoolManager 来获得 page 的 PageGuard,
+  // 通过 PageGuard 对 frame 进行 thread-safe 读写.
   auto CheckedWritePage(page_id_t page_id, AccessType access_type = AccessType::Unknown)
       -> std::optional<WritePageGuard>;
   auto CheckedReadPage(page_id_t page_id, AccessType access_type = AccessType::Unknown) -> std::optional<ReadPageGuard>;
@@ -126,7 +141,11 @@ class BufferPoolManager {
   auto GetPinCount(page_id_t page_id) -> std::optional<size_t>;
 
  private:
-  /** @brief The number of frames in the buffer pool. */
+  /** @brief The number of frames in the buffer pool.
+   *
+   * 构造时决定, 实际大小取决于 memory 大小.
+   *
+   */
   const size_t num_frames_;
 
   /** @brief The next page ID to be allocated.  */
@@ -134,6 +153,9 @@ class BufferPoolManager {
 
   /**
    * @brief The latch protecting the buffer pool's inner data structures.
+   *
+   * BufferPool Manager Latch,
+   * 在读写 BufferPoolManager 内所有对象时上锁.
    *
    * TODO(P1) We recommend replacing this comment with details about what this latch actually protects.
    */
