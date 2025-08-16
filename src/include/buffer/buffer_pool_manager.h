@@ -65,6 +65,9 @@ class FrameHeader {
   explicit FrameHeader(frame_id_t frame_id);
 
  private:
+  // FrameHeader 的接口全都 NOT thread-safe.
+  // 因为 PageGuard 通常生命周期内都持有 `rwlatch`,
+  // BufferPoolManager 需要调用前额外 lock `rwlatch_`.
   auto GetData() const -> const char *;
   auto GetDataMut() -> char *;
   void Reset();
@@ -76,7 +79,9 @@ class FrameHeader {
    *
    * 对 frame 加锁, 在 PageGuard 构造时, 就应该上锁,
    * PageGuard 析构时解锁.
-   * BufferPoolManager 不允许对此上锁.
+   *
+   * BufferPoolManager 也可能对此上锁, 在 evict page 时,
+   * 需要读 frame 的 FrameHeader 来查询被 evict 的 page id.
    *
    */
   std::shared_mutex rwlatch_;
@@ -96,8 +101,9 @@ class FrameHeader {
    * @brief A pointer to the data of the page that this frame holds.
    *
    * If the frame does not hold any page data, the frame contains all null bytes.
+   *
+   * memory frame 的实际数据
    */
-  // memory frame 的实际数据
   std::vector<char> data_;
 
   /**
@@ -106,7 +112,13 @@ class FrameHeader {
    * One potential optimization you could make is storing an optional page ID of the page that the `FrameHeader` is
    * currently storing. This might allow you to skip searching for the corresponding (page ID, frame ID) pair somewhere
    * else in the buffer pool manager...
+   *
+   * 当前 frame 存储的数据所属的 disk page.
+   * 主要用于通过 frame 反查 page, 以便维护 BufferPoolManager 中的 `page_table_`.
+   * 注意, page_id_ 为 0 时可能有效或无效,
+   * 只有 `page_table_` 能通过 page id 0 映射到此 frame 才说明有效.
    */
+  page_id_t page_id_{INVALID_PAGE_ID};
 };
 
 /**
@@ -141,10 +153,13 @@ class BufferPoolManager {
   auto GetPinCount(page_id_t page_id) -> std::optional<size_t>;
 
  private:
+  auto AllocateFrameUnsafe(page_id_t page_id) -> frame_id_t;
+  auto FetchPageUnsafe(page_id_t page_id, frame_id_t frame_id) -> bool;
+
+ private:
   /** @brief The number of frames in the buffer pool.
    *
    * 构造时决定, 实际大小取决于 memory 大小.
-   *
    */
   const size_t num_frames_;
 
@@ -155,22 +170,53 @@ class BufferPoolManager {
    * @brief The latch protecting the buffer pool's inner data structures.
    *
    * BufferPool Manager Latch,
-   * 在读写 BufferPoolManager 内所有对象时上锁.
+   * 在读写 BufferPoolManager 内
+   * `page_table_`, `free_frames_`, `replacer_`(逻辑需要)
+   * 时上锁.
    *
    * TODO(P1) We recommend replacing this comment with details about what this latch actually protects.
    */
   std::shared_ptr<std::mutex> bpm_latch_;
 
-  /** @brief The frame headers of the frames that this buffer pool manages. */
+  /** @brief The frame headers of the frames that this buffer pool manages.
+   *
+   * 维护所有的 frame.
+   * 在 BufferPoolManager 构造后不会修改,
+   * 访问其中 FrameHeader 需要对 FrameHeader `rwlatch_` 上锁.
+   *
+   * thread-safe.
+   */
   std::vector<std::shared_ptr<FrameHeader>> frames_;
 
-  /** @brief The page table that keeps track of the mapping between pages and buffer pool frames. */
+  /** @brief The page table that keeps track of the mapping between pages and buffer pool frames.
+   *
+   * 维护每个 page 所在的 frame id.
+   * 所有对 page 的 R/W 都需要经过 `page_table_` 寻址到 frame.
+   *
+   * NOT thread-safe.
+   */
   std::unordered_map<page_id_t, frame_id_t> page_table_;
 
-  /** @brief A list of free frames that do not hold any page's data. */
+  /** @brief A list of free frames that do not hold any page's data.
+   *
+   * 所有可用的空 frame.
+   * 如果此 list 为空, 则需要 replacer 淘汰 page 并复用 frame.
+   *
+   * NOT thread-safe.
+   */
   std::list<frame_id_t> free_frames_;
 
-  /** @brief The replacer to find unpinned / candidate pages for eviction. */
+  /** @brief The replacer to find unpinned / candidate pages for eviction.
+   *
+   * 负责维护 page 访问事件, 并用于 page evict 的 replacer.
+   *
+   * 注意每次 `Evict`, 被驱逐的 page 对应的 frame 应该被写盘.
+   * 注意所有 frame 默认是不可驱逐的, 需要在合适的时机手动调整.
+   *
+   * 调用 `SetEvictable` 必须 lock `bpm_latch_` 来保证条件检查有效.
+   *
+   * thread-safe.
+   */
   std::shared_ptr<LRUKReplacer> replacer_;
 
   /** @brief A pointer to the disk scheduler. */

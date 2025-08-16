@@ -40,9 +40,7 @@ class DiskManager {
 
   virtual ~DiskManager() = default;
 
-  /**
-   * Shut down the disk manager and close all the file resources.
-   */
+  // 只用在 test 里的测试函数.
   void ShutDown();
 
   /**

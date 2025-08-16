@@ -39,15 +39,11 @@ namespace bustub {
  */
 ReadPageGuard::ReadPageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> frame,
                              std::shared_ptr<LRUKReplacer> replacer, std::shared_ptr<std::mutex> bpm_latch)
-    : page_id_(page_id),
-      frame_(std::move(frame)),           // FrameHeader, 用于获取数据, 维护 frame 引用计数.
-      replacer_(std::move(replacer)),     // LRUKReplacer, 用于在上层访问 frame 时, 向 replacer 注册访问事件.
-      bpm_latch_(std::move(bpm_latch)) {  // 对 BufferPoolManager 加锁.
-
+    : page_id_(page_id), frame_(std::move(frame)), replacer_(std::move(replacer)), bpm_latch_(std::move(bpm_latch)) {
   // UNIMPLEMENTED("TODO(P1): Add implementation.");
   // 锁 BPM
   {
-    std::lock_guard<std::mutex> guard{*bpm_latch};
+    std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
     replacer_->RecordAccess(frame_->frame_id_);
     if (frame_->pin_count_.fetch_add(1, std::memory_order_relaxed) == 0) {
       replacer_->SetEvictable(frame_->frame_id_, false);
@@ -72,8 +68,13 @@ ReadPageGuard::ReadPageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> fra
  * TODO(P1): Add implementation.
  *
  * @param that The other page guard.
+ *
+ * 测试中存在 self assignment 测试.
  */
 ReadPageGuard::ReadPageGuard(ReadPageGuard &&that) noexcept {
+  if (&that == this) {
+    return;
+  }
   Drop();
   page_id_ = that.page_id_;
   frame_ = std::move(that.frame_);
@@ -101,6 +102,9 @@ ReadPageGuard::ReadPageGuard(ReadPageGuard &&that) noexcept {
  * @return ReadPageGuard& The newly valid `ReadPageGuard`.
  */
 auto ReadPageGuard::operator=(ReadPageGuard &&that) noexcept -> ReadPageGuard & {
+  if (&that == this) {
+    return *this;
+  }
   Drop();
   page_id_ = that.page_id_;
   frame_ = std::move(that.frame_);
@@ -156,9 +160,8 @@ void ReadPageGuard::Drop() {
   }
   // 在此处 `unlock_shared`, 允许其他线程读写 frame.
   frame_->rwlatch_.unlock_shared();
-  // `bpm_latch_` 存在 Synchronizes-with 作用, 不需要依赖 atomic.
   {
-    std::lock_guard<std::mutex> guard{*bpm_latch_};
+    std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
     if (frame_->pin_count_.fetch_sub(1, std::memory_order_relaxed) == 1) {
       // 注意此处可能的 Race: 另一个线程访问此 frame, 并设置 false evictable.
       // 通过 `bpm_latch_` 阻止.
@@ -192,15 +195,15 @@ WritePageGuard::WritePageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> f
     : page_id_(page_id), frame_(std::move(frame)), replacer_(std::move(replacer)), bpm_latch_(std::move(bpm_latch)) {
   // UNIMPLEMENTED("TODO(P1): Add implementation.");
   {
-    std::lock_guard<std::mutex> guard{*bpm_latch};
+    std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
     replacer_->RecordAccess(frame_->frame_id_);
     if (frame_->pin_count_.fetch_add(1, std::memory_order_relaxed) == 0) {
       replacer_->SetEvictable(frame_->frame_id_, false);
     }
   }
   // 锁 frame, Reader 锁
-
   frame_->rwlatch_.lock();
+  frame_->is_dirty_ = true;
   is_valid_ = true;
 }
 
@@ -220,6 +223,9 @@ WritePageGuard::WritePageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> f
  * @param that The other page guard.
  */
 WritePageGuard::WritePageGuard(WritePageGuard &&that) noexcept {
+  if (&that == this) {
+    return;
+  }
   Drop();
   page_id_ = that.page_id_;
   frame_ = std::move(that.frame_);
@@ -247,6 +253,9 @@ WritePageGuard::WritePageGuard(WritePageGuard &&that) noexcept {
  * @return WritePageGuard& The newly valid `WritePageGuard`.
  */
 auto WritePageGuard::operator=(WritePageGuard &&that) noexcept -> WritePageGuard & {
+  if (&that == this) {
+    return *this;
+  }
   Drop();
   page_id_ = that.page_id_;
   frame_ = std::move(that.frame_);
@@ -307,7 +316,7 @@ void WritePageGuard::Drop() {
   }
   frame_->rwlatch_.unlock();
   {
-    std::lock_guard<std::mutex> guard{*bpm_latch_};
+    std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
     if (frame_->pin_count_.fetch_sub(1, std::memory_order_relaxed) == 1) {
       replacer_->SetEvictable(frame_->frame_id_, true);
     }

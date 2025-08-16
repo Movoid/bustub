@@ -75,8 +75,13 @@ class LRUKNode {
  * classical LRU algorithm is used to choose victim.
  *
  * NOTICE: If history length is less than `k`, then the most previous timestamp is `+inf`.
+ *
  * LRUKReplacer 是个 metaclass, 其中维护了所有的 page id,
  * 仅记录对 page 的访问历史, 用作实现 page 淘汰逻辑。
+ *
+ * 注意, Replacer 实际淘汰的是 page, 每个活跃的 page 占据一个 frame,
+ * 而不活跃的 page, Replacer 会将其 evict, 并返回其 frame id,
+ * 此 frame 将被 BufferPoolMannager 清空, 用于新 load 到 memory 的 page.
  */
 class LRUKReplacer {
  public:

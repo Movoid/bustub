@@ -23,8 +23,9 @@ namespace bustub {
 
 /**
  * @brief Represents a Write or Read request for the DiskManager to execute.
+ *
+ * 读写请求
  */
-// 读写请求
 struct DiskRequest {
   /** Flag indicating whether the request is a write or a read. */
   bool is_write_;
@@ -52,6 +53,7 @@ struct DiskRequest {
  */
 class DiskScheduler {
  public:
+  // DiskScheduler 是 DiskManager 的 wrapper.
   explicit DiskScheduler(DiskManager *disk_manager);
   ~DiskScheduler();
 
@@ -75,9 +77,10 @@ class DiskScheduler {
    * so that our test cases can use your promise implementation.
    *
    * @return std::promise<bool>
+   *
+   * 这里 bustub 使用 promise/future 仅用于异步等待,
+   *  future 没有返回信息.
    */
-  // 这里 bustub 使用 promise/future 仅用于异步等待,
-  //  future 没有返回信息.
   auto CreatePromise() -> DiskSchedulerPromise { return {}; };
 
   /**

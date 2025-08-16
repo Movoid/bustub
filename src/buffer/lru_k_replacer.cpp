@@ -62,7 +62,7 @@ LRUKReplacer::LRUKReplacer(size_t num_frames, size_t k) : curr_size_{num_frames}
  */
 auto LRUKReplacer::Evict() -> std::optional<frame_id_t> {
   bool can_evict{};
-  frame_id_t to_evict{};
+  frame_id_t to_evict{INVALID_FRAME_ID};
   size_t min_kth_history{std::numeric_limits<size_t>::max()};
   size_t min_oldest_history{std::numeric_limits<size_t>::max()};
   {
