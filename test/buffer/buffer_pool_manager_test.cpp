@@ -31,7 +31,7 @@ void CopyString(char *dest, const std::string &src) {
   snprintf(dest, BUSTUB_PAGE_SIZE, "%s", src.c_str());
 }
 
-TEST(BufferPoolManagerTest, DISABLED_VeryBasicTest) {
+TEST(BufferPoolManagerTest, VeryBasicTest) {
   // A very basic test.
 
   auto disk_manager = std::make_shared<DiskManager>(db_fname);
@@ -431,84 +431,6 @@ TEST(BufferPoolManagerTest, EvictableTest) {
 }
 
 TEST(BufferPoolManagerTest, My_FlushPageTest1) {
-  auto disk_manager = std::make_shared<DiskManager>(db_fname);
-  auto bpm = std::make_shared<BufferPoolManager>(3, disk_manager.get(), 5);
-
-  // Write
-
-  auto pid1{bpm->NewPage()};
-  auto pid2{bpm->NewPage()};
-  auto pid3{bpm->NewPage()};
-
-  auto check1{bpm->CheckedWritePage(pid1)};
-  auto check2{bpm->CheckedWritePage(pid2)};
-  auto check3{bpm->CheckedWritePage(pid3)};
-
-  ASSERT_EQ(true, check1.has_value());
-  ASSERT_EQ(true, check2.has_value());
-  ASSERT_EQ(true, check3.has_value());
-  auto pg1{std::move(check1).value()};
-  auto pg2{std::move(check2).value()};
-  auto pg3{std::move(check3).value()};
-
-  auto page1_data{pg1.GetDataMut()};
-  auto page2_data{pg2.GetDataMut()};
-  auto page3_data{pg3.GetDataMut()};
-  ASSERT_EQ(true, pg1.IsDirty());
-  ASSERT_EQ(true, pg2.IsDirty());
-  ASSERT_EQ(true, pg3.IsDirty());
-
-  std::strcpy(page1_data, "Hello1");
-  std::strcpy(page2_data, "Hello2");
-  std::strcpy(page3_data, "Hello3");
-
-  pg1.Flush();
-  pg2.Flush();
-  pg3.Flush();
-  ASSERT_EQ(false, pg1.IsDirty());
-  ASSERT_EQ(false, pg2.IsDirty());
-  ASSERT_EQ(false, pg3.IsDirty());
-
-  pg1.Drop();
-  pg2.Drop();
-  pg3.Drop();
-
-  // Read
-
-  auto check4{bpm->CheckedReadPage(pid1)};
-  auto check5{bpm->CheckedReadPage(pid2)};
-  auto check6{bpm->CheckedReadPage(pid3)};
-
-  ASSERT_EQ(true, check4.has_value());
-  ASSERT_EQ(true, check5.has_value());
-  ASSERT_EQ(true, check6.has_value());
-
-  auto pg4{std::move(check4).value()};
-  auto pg5{std::move(check5).value()};
-  auto pg6{std::move(check6).value()};
-
-  auto page1_data_r = pg4.GetData();
-  auto page2_data_r = pg5.GetData();
-  auto page3_data_r = pg6.GetData();
-
-  ASSERT_EQ(false, pg4.IsDirty());
-  ASSERT_EQ(false, pg5.IsDirty());
-  ASSERT_EQ(false, pg6.IsDirty());
-
-  ASSERT_STREQ("Hello1", page1_data_r);
-  ASSERT_STREQ("Hello2", page2_data_r);
-  ASSERT_STREQ("Hello3", page3_data_r);
-
-  ASSERT_EQ(pid1, pg4.GetPageId());
-  ASSERT_EQ(pid2, pg5.GetPageId());
-  ASSERT_EQ(pid3, pg6.GetPageId());
-
-  pg4.Drop();
-  pg5.Drop();
-  pg6.Drop();
-}
-
-TEST(BufferPoolManagerTest, My_FlushPageTest2) {
   auto disk_manager = std::make_shared<DiskManager>(db_fname);
   auto bpm = std::make_shared<BufferPoolManager>(3, disk_manager.get(), 5);
 
