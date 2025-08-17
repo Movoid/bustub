@@ -33,22 +33,23 @@ class LRUKNode {
   /** History of last seen K timestamps of this page. Least recent timestamp stored in front. */
   // Remove maybe_unused if you start using them. Feel free to change the member variables as you want.
 
-  [[maybe_unused]] size_t k_;
-  [[maybe_unused]] std::vector<size_t> history_;  // history of access timestamps.
-  [[maybe_unused]] size_t beg_idx_{};
-  [[maybe_unused]] size_t end_idx_{};
+  size_t k_;
+  size_t next_idx_{};
+  std::vector<size_t> history_;  // History of access timestamps.
   [[maybe_unused]] frame_id_t fid_;
-  [[maybe_unused]] bool is_evictable_{false};
+  bool is_evictable_{false};
 
  public:
-  LRUKNode() = default;
   ~LRUKNode() = default;
 
-  DISALLOW_COPY_AND_MOVE(LRUKNode);
+  LRUKNode(const LRUKNode &) = delete;
+  auto operator=(const LRUKNode &) -> LRUKNode & = delete;
+  LRUKNode(LRUKNode &&) noexcept = default;                      // 允许移动
+  auto operator=(LRUKNode &&) noexcept -> LRUKNode & = default;  // 允许移动
 
   LRUKNode(frame_id_t id, size_t k);
 
-  void SetNewTimestamp(size_t time);
+  void Record(size_t time);
 
   auto GetPreviousKthHistory() -> size_t;
 
@@ -58,7 +59,7 @@ class LRUKNode {
 
   auto CheckEvictable() -> bool;
 
-  void ClearHistory();
+  void Reset();
 };
 
 /**
@@ -179,12 +180,13 @@ class LRUKReplacer {
  private:
   // TODO(student): implement me! You can replace these member variables as you like.
   // Remove maybe_unused if you start using them.
-  [[maybe_unused]] std::unordered_map<frame_id_t, LRUKNode> node_store_;
-  [[maybe_unused]] size_t current_timestamp_{1};
-  [[maybe_unused]] size_t curr_size_{};
-  [[maybe_unused]] size_t replacer_size_{};
-  [[maybe_unused]] size_t k_;
-  [[maybe_unused]] std::mutex latch_;
+  // std::unordered_map<frame_id_t, LRUKNode> node_store_;
+  std::vector<LRUKNode> node_store_;
+  size_t current_timestamp_{1};
+  const size_t max_size_;
+  size_t replacer_size_{};
+  size_t k_;
+  std::mutex latch_;
 };
 
 }  // namespace bustub

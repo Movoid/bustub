@@ -262,6 +262,8 @@ auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
       frame.Reset();
       frame.page_id_ = INVALID_PAGE_ID;
     }
+    // Delete disk page.
+    disk_scheduler_->DeallocatePage(page_id);
     free_frames_.emplace_back(frame.frame_id_);
   }
   return true;

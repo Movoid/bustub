@@ -119,4 +119,79 @@ TEST(LRUKReplacerTest, SampleTest) {
   lru_replacer.SetEvictable(6, true);
 }
 
+TEST(LRUKReplacerTest, My_EvictTest) {
+  LRUKReplacer replacer{500, 5};
+
+  for (int i = 0; i < 500; i++) {
+    replacer.RecordAccess(i);
+    replacer.SetEvictable(i, true);
+  }
+
+  ASSERT_EQ(500, replacer.Size());
+
+  int tmp{500};
+  for (int i = 0; i < 250; i++) {
+    replacer.Remove(i);
+    tmp--;
+    ASSERT_EQ(tmp, replacer.Size());
+  }
+
+  for (int i = 250; i < 260; i++) {
+    replacer.RecordAccess(i);
+  }
+  for (int i = 250; i < 260; i++) {
+    auto evicted{replacer.Evict()};
+    ASSERT_EQ(true, evicted.has_value());
+    ASSERT_EQ(i, evicted.value());
+  }
+  ASSERT_EQ(240, replacer.Size());
+
+  for (int j = 0; j < 4; j++) {
+    for (int i = 260; i < 270; i++) {
+      replacer.RecordAccess(i);
+    }
+  }
+  for (int i = 270; i < 280; i++) {
+    auto evicted{replacer.Evict()};
+    ASSERT_EQ(true, evicted.has_value());
+    ASSERT_EQ(i, evicted.value());
+  }
+  ASSERT_EQ(230, replacer.Size());
+
+  for (int i = 280; i < 290; i++) {
+    replacer.SetEvictable(i, false);
+  }
+  ASSERT_EQ(220, replacer.Size());
+  for (int i = 290; i < 300; i++) {
+    auto evicted{replacer.Evict()};
+    ASSERT_EQ(true, evicted.has_value());
+    ASSERT_EQ(i, evicted.value());
+  }
+  ASSERT_EQ(210, replacer.Size());
+
+  for (int i = 280; i < 290; i++) {
+    replacer.SetEvictable(i, true);
+  }
+  ASSERT_EQ(220, replacer.Size());
+  for (int i = 280; i < 290; i++) {
+    auto evicted{replacer.Evict()};
+    ASSERT_EQ(true, evicted.has_value());
+    ASSERT_EQ(i, evicted.value());
+  }
+  ASSERT_EQ(210, replacer.Size());
+
+  for (int i = 300; i < 500; i++) {
+    auto evicted{replacer.Evict()};
+    ASSERT_EQ(true, evicted.has_value());
+    ASSERT_EQ(i, evicted.value());
+  }
+  ASSERT_EQ(10, replacer.Size());
+  for (int i = 260; i < 270; i++) {
+    auto evicted{replacer.Evict()};
+    ASSERT_EQ(true, evicted.has_value());
+    ASSERT_EQ(i, evicted.value());
+  }
+  ASSERT_EQ(0, replacer.Size());
+}
+
 }  // namespace bustub
