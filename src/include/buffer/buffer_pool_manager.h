@@ -153,7 +153,7 @@ class BufferPoolManager {
   auto GetPinCount(page_id_t page_id) -> std::optional<size_t>;
 
  private:
-  auto AllocateFrameUnsafe(page_id_t page_id) -> frame_id_t;
+  auto AllocateFrameUnsafe(page_id_t page_id, bool is_evictable) -> frame_id_t;
   auto FetchPageUnsafe(page_id_t page_id, frame_id_t frame_id) -> bool;
 
  private:
