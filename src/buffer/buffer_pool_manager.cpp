@@ -129,10 +129,11 @@ auto BufferPoolManager::AllocateFrameUnsafe(page_id_t page_id, bool is_evictable
       std::lock_guard<std::shared_mutex> frame_guard{frames_[frame_id]->rwlatch_};
       FrameHeader &frame{*frames_[frame_id]};
       old_page_id = frame.page_id_;
-      if (!FlushPage(old_page_id)) {
-        throw bustub::Exception{bustub::ExceptionType::UNKNOWN_TYPE,
-                                "BufferPoolManager::AllocateFrameUnsafe: Old page flush failed unexpectedly."};
-      }
+      auto p{disk_scheduler_->CreatePromise()};
+      std::future<bool> fut{p.get_future()};
+      DiskRequest req{true, frame.GetDataMut(), old_page_id, std::move(p)};
+      disk_scheduler_->Schedule(std::move(req));
+      fut.get();
       frame.Reset();
       frame.page_id_ = page_id;
     }
@@ -466,8 +467,33 @@ auto BufferPoolManager::ReadPage(page_id_t page_id, AccessType access_type) -> R
  *
  * @param page_id The page ID of the page to be flushed.
  * @return `false` if the page could not be found in the page table, otherwise `true`.
+ *
+ * 调用前必须 lock frame.
+ * 此函数不会死锁,
+ * 前提是没有其他函数尝试嵌套 BufferPoolManager `bpm_latch_` + FrameHeader `rwlatch_`.
  */
-auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool { UNIMPLEMENTED("TODO(P1): Add implementation."); }
+auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool {
+  // UNIMPLEMENTED("TODO(P1): Add implementation.");
+  frame_id_t frame_id{};
+  {
+    std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
+    auto pt_iter{page_table_.find(page_id)};
+    if (pt_iter == page_table_.end()) {
+      return false;
+    }
+    frame_id = pt_iter->second;
+  }
+
+  // Don't lock frame.
+  FrameHeader &frame{*frames_[frame_id]};
+  auto p{disk_scheduler_->CreatePromise()};
+  std::future<bool> fut{p.get_future()};
+  DiskRequest req{true, frame.GetDataMut(), page_id, std::move(p)};
+  disk_scheduler_->Schedule(std::move(req));
+  fut.get();
+  frame.is_dirty_ = false;
+  return true;
+}
 
 /**
  * @brief Flushes all page data that is in memory to disk.

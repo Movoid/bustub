@@ -87,7 +87,7 @@ class FrameHeader {
   std::shared_mutex rwlatch_;
 
   /** @brief The number of pins on this frame keeping the page in memory. */
-  // 引用计数, 每个 PageGuard
+  // 引用计数
   std::atomic<size_t> pin_count_;
 
   /** @brief The dirty flag.
