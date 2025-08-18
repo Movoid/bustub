@@ -46,7 +46,6 @@ void FrameHeader::Reset() {
   std::fill(data_.begin(), data_.end(), 0);
   pin_count_.store(0);
   is_dirty_ = false;
-  page_id_ = INVALID_PAGE_ID;
 }
 
 /**
@@ -108,71 +107,30 @@ BufferPoolManager::~BufferPoolManager() = default;
 auto BufferPoolManager::Size() const -> size_t { return num_frames_; }
 
 /**
- * @brief Helper. 获得一个可用的 frame.
- *
- * 若 frame 来自 `replacer_` 驱逐, 将原 page data 写盘.
- * 不读 disk.
- */
-auto BufferPoolManager::AllocateFrameUnsafe(page_id_t page_id, bool is_evictable) -> frame_id_t {
-  frame_id_t frame_id{INVALID_FRAME_ID};
-
-  // Acquire a frame.
-  if (free_frames_.empty()) {
-    auto evicted{replacer_->Evict()};
-    if (!evicted.has_value()) {  // Not enough memory.
-      return INVALID_FRAME_ID;
-    }
-    frame_id = evicted.value();
-    // Flush old frame.
-    page_id_t old_page_id{INVALID_PAGE_ID};
-    {
-      std::lock_guard<std::shared_mutex> frame_guard{frames_[frame_id]->rwlatch_};
-      FrameHeader &frame{*frames_[frame_id]};
-      old_page_id = frame.page_id_;
-      auto p{disk_scheduler_->CreatePromise()};
-      std::future<bool> fut{p.get_future()};
-      DiskRequest req{true, frame.GetDataMut(), old_page_id, std::move(p)};
-      disk_scheduler_->Schedule(std::move(req));
-      fut.get();
-      frame.Reset();
-      frame.page_id_ = page_id;
-    }
-    // Remove metadata of old page.
-    page_table_.erase(old_page_id);
-    replacer_->Remove(frame_id);  // This is needed.
-  } else {
-    frame_id = free_frames_.back();
-    free_frames_.pop_back();
-    {
-      std::lock_guard<std::shared_mutex> frame_guard{frames_[frame_id]->rwlatch_};
-      FrameHeader &frame{*frames_[frame_id]};
-      frame.page_id_ = page_id;
-    }
-  }
-  // Release this frame with `is_evictable`.
-  page_table_.emplace(page_id, frame_id);
-  replacer_->RecordAccess(frame_id);
-  replacer_->SetEvictable(frame_id, is_evictable);
-  return frame_id;
-}
-
-/**
  * @brief Helper. 将一个 disk page 数据读到 memory frame.
  *
  * 读 disk.
  */
 auto BufferPoolManager::FetchPageUnsafe(page_id_t page_id, frame_id_t frame_id) -> bool {
-  // Validation.
-  // auto pt_iter{page_table_.find(page_id)};
-  // if (pt_iter == page_table_.end() || pt_iter->second != frame_id) {
-  //   return false;
-  // }
-  BUSTUB_ASSERT(page_table_.find(page_id) != page_table_.end() && page_table_[page_id] == frame_id,
-                "BufferPoolManager::FetchPageUnsafe: Invalid mapping.");
   FrameHeader &frame{*frames_[frame_id]};
   auto p{disk_scheduler_->CreatePromise()};
   std::future<bool> fut{p.get_future()};
   DiskRequest req{false, frame.GetDataMut(), page_id, std::move(p)};
+  disk_scheduler_->Schedule(std::move(req));
+  fut.get();
+  return true;
+}
+
+/**
+ * @brief Helper. 将一个 memory frame 数据写到 disk page.
+ *
+ * 写 disk.
+ */
+auto BufferPoolManager::FlushPageUnsafe(page_id_t page_id, frame_id_t frame_id) -> bool {
+  FrameHeader &frame{*frames_[frame_id]};
+  auto p{disk_scheduler_->CreatePromise()};
+  std::future<bool> fut{p.get_future()};
+  DiskRequest req{true, frame.GetDataMut(), page_id, std::move(p)};
   disk_scheduler_->Schedule(std::move(req));
   fut.get();
   return true;
@@ -198,22 +156,42 @@ auto BufferPoolManager::FetchPageUnsafe(page_id_t page_id, frame_id_t frame_id) 
  */
 auto BufferPoolManager::NewPage() -> page_id_t {
   // UNIMPLEMENTED("TODO(P1): Add implementation.");
-  page_id_t new_page_id{next_page_id_.fetch_add(1, std::memory_order_relaxed)};
+  page_id_t page_id{next_page_id_.fetch_add(1, std::memory_order_relaxed)};
   // DiskManager 接口限制, 必须将新的 disk page 存入一个 memory frame.
 
+  frame_id_t frame_id{INVALID_FRAME_ID};
   {
     std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
-    frame_id_t frame_id{AllocateFrameUnsafe(new_page_id, true)};
-    if (frame_id == INVALID_FRAME_ID) {
-      return INVALID_PAGE_ID;
+    if (free_frames_.empty()) {  // Evict.
+      auto evicted{replacer_->Evict()};
+      if (!evicted.has_value()) {
+        return INVALID_FRAME_ID;
+      }
+      frame_id = evicted.value();
+    } else {  // Reuse.
+      frame_id = free_frames_.back();
+      free_frames_.pop_back();
     }
+
+    FrameHeader &frame{*frames_[frame_id]};
+    page_id_t old_page_id{frame.page_id_};
+    page_table_.erase(old_page_id);
   }
 
-  // 此时允许其他线程读写当前新分配的 page,
-  // page 的结构必须是有效的.
-  // 即使此 page 暂时不存在于 disk 上.
+  FrameHeader &frame{*frames_[frame_id]};
+  {
+    std::lock_guard<std::shared_mutex> frame_guard{frame.rwlatch_};
+    if (frame.page_id_ != INVALID_PAGE_ID && frame.is_dirty_) {
+      FlushPageUnsafe(frame.page_id_, frame_id);
+    }
+    frame.Reset();
+    FetchPageUnsafe(page_id, frame_id);
+  }
 
-  return new_page_id;
+  frame.page_id_ = page_id;
+  replacer_->SetEvictable(frame_id, true);
+
+  return page_id;
 }
 
 /**

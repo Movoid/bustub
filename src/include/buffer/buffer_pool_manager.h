@@ -153,8 +153,8 @@ class BufferPoolManager {
   auto GetPinCount(page_id_t page_id) -> std::optional<size_t>;
 
  private:
-  auto AllocateFrameUnsafe(page_id_t page_id, bool is_evictable) -> frame_id_t;
   auto FetchPageUnsafe(page_id_t page_id, frame_id_t frame_id) -> bool;
+  auto FlushPageUnsafe(page_id_t page_id, frame_id_t frame_id) -> bool;
 
  private:
   /** @brief The number of frames in the buffer pool.
@@ -174,6 +174,8 @@ class BufferPoolManager {
    * `page_table_`, `free_frames_`, `replacer_`(逻辑需要)
    * 时上锁.
    *
+   * 读写 FrameHeader 中的 `page_id_` 使用此锁.
+   *
    * TODO(P1) We recommend replacing this comment with details about what this latch actually protects.
    */
   std::shared_ptr<std::mutex> bpm_latch_;
@@ -182,7 +184,7 @@ class BufferPoolManager {
    *
    * 维护所有的 frame.
    * 在 BufferPoolManager 构造后不会修改,
-   * 访问其中 FrameHeader 需要对 FrameHeader `rwlatch_` 上锁.
+   * 访问 FrameHeader `data_` 等需要对 `rwlatch_` 上锁.
    *
    * thread-safe.
    */
