@@ -86,8 +86,12 @@ class FrameHeader {
    */
   std::shared_mutex rwlatch_;
 
-  /** @brief The number of pins on this frame keeping the page in memory. */
-  // 引用计数
+  /** @brief The number of pins on this frame keeping the page in memory.
+   *
+   * 注意, `pin_count_` 必须和 replacer_ `SetEvictable` 完全同步,
+   * 且必须用 `bpm_latch_` 保护原子操作,
+   * 用 frame `rwlatch_` 会导致需要检查 `pin_count_` 时重复上锁死锁.
+   */
   std::atomic<size_t> pin_count_;
 
   /** @brief The dirty flag.
@@ -155,6 +159,9 @@ class BufferPoolManager {
  private:
   auto FetchPageUnsafe(page_id_t page_id, frame_id_t frame_id) -> bool;
   auto FlushPageUnsafe(page_id_t page_id, frame_id_t frame_id) -> bool;
+  auto AcquireNewFrameUnsafe() -> frame_id_t;
+  void ReleaseNewFrameUnsafe(page_id_t old_page_id, page_id_t page_id, frame_id_t frame_id, bool set_evictable);
+  auto FindFrameUnsafe(page_id_t page_id) -> frame_id_t;
 
  private:
   /** @brief The number of frames in the buffer pool.
