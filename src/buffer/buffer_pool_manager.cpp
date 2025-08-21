@@ -12,6 +12,8 @@
 
 #include "buffer/buffer_pool_manager.h"
 
+// #include "common/custom_debug.h"
+
 namespace bustub {
 
 /**
@@ -186,7 +188,7 @@ auto BufferPoolManager::NewPage() -> page_id_t {
   // UNIMPLEMENTED("TODO(P1): Add implementation.");
   // DiskManager 接口限制, 必须将新的 disk page 存入一个 memory frame.
 
-  std::cout << "[Thread " << std::this_thread::get_id() << "] " << "Call\t\t NewPage()" << std::endl;
+  // DebugLog("Call\t\t NewPage()");
 
   page_id_t page_id{next_page_id_.fetch_add(1, std::memory_order_relaxed)};
   frame_id_t frame_id{INVALID_FRAME_ID};
@@ -195,8 +197,7 @@ auto BufferPoolManager::NewPage() -> page_id_t {
     std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
     frame_id = AcquireNewFrameUnsafe();
     if (frame_id == INVALID_FRAME_ID) {
-      std::cout << "[Thread " << std::this_thread::get_id() << "] " << "Fail\t\t NewPage(): Not enough memory."
-                << std::endl;
+      // DebugLog("Failed\t\t NewPage() : {}", "Not enough memory.");
       return INVALID_PAGE_ID;
     }
   }
@@ -207,16 +208,15 @@ auto BufferPoolManager::NewPage() -> page_id_t {
     if (frame.page_id_ != INVALID_PAGE_ID) {
       FlushPageUnsafe(frame.page_id_, frame_id);
     }
-    frame.Reset();
-    frame.page_id_ = page_id;
     {
       std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
-      ReleaseNewFrameUnsafe(old_page_id, page_id, frame_id, true);  // Evictable?
+      ReleaseNewFrameUnsafe(old_page_id, page_id, frame_id, true);  // Evictable
     }
+    frame.Reset();
+    frame.page_id_ = page_id;
   }
-  std::cout << "[Thread " << std::this_thread::get_id() << "] " << "OK\t\t NewPage(): Return page " << page_id << "."
-            << std::endl;
 
+  // DebugLog("OK\t\t NewPage() : {}", page_id);
   return page_id;
 }
 
@@ -244,51 +244,45 @@ auto BufferPoolManager::NewPage() -> page_id_t {
 auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
   // UNIMPLEMENTED("TODO(P1): Add implementation.");
 
-  std::cout << "[Thread " << std::this_thread::get_id() << "] " << "Call\t\t DeletePage(" << page_id << ")"
-            << std::endl;
+  // DebugLog("Call\t\t DeletePage({})", page_id);
 
   while (true) {
     frame_id_t frame_id{INVALID_FRAME_ID};
     {
       std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
       frame_id = FindFrameUnsafe(page_id);
-    }
-    if (frame_id == INVALID_FRAME_ID) {
-      disk_scheduler_->DeallocatePage(page_id);
-      std::cout << "[Thread " << std::this_thread::get_id() << "] " << "OK\t\t DeletePage(" << page_id
-                << "): Deallocated but page is not in memory." << std::endl;
-      return true;
-    }
-    FrameHeader &frame{*frames_[frame_id]};
-    // `pin_count_` 不写不需要锁.
-    if (frame.pin_count_.load(std::memory_order_relaxed) > 0) {
-      std::cout << "[Thread " << std::this_thread::get_id() << "] " << "Fail\t\t DeletePage(" << page_id
-                << "): Page is pinned." << std::endl;
-      return false;
+      if (frame_id == INVALID_FRAME_ID) {
+        disk_scheduler_->DeallocatePage(page_id);
+        // DebugLog("OK\t\t DeletePage({}) : {}", page_id, "Deallocated but not in mem.");
+        return true;
+      }
+      FrameHeader &frame{*frames_[frame_id]};
+      if (frame.pin_count_.load(std::memory_order_relaxed) > 0) {
+        return false;
+      }
     }
     {
       std::lock_guard<std::shared_mutex> frame_guard{frames_[frame_id]->rwlatch_};
-      // Validation.
+      FrameHeader &frame{*frames_[frame_id]};
       {
         std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
         frame_id_t check_id{FindFrameUnsafe(page_id)};
+        // Validation.
         if (frame_id != check_id) {
           continue;
         }
-      }
-      // Validation passed.
+        if (frame.pin_count_.load(std::memory_order_relaxed) > 0) {
+          return false;
+        }
 
-      frame.Reset();
-      disk_scheduler_->DeallocatePage(page_id);
-      {
-        std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
         replacer_->Remove(frame_id);
         page_table_.erase(page_id);
         free_frames_.emplace_back(frame_id);
+        disk_scheduler_->DeallocatePage(page_id);
       }
+      frame.Reset();
     }
-    std::cout << "[Thread " << std::this_thread::get_id() << "] " << "OK\t\t DeletePage(" << page_id
-              << "): Deleted page." << std::endl;
+    // DebugLog("OK\t\t DeletePage({}) : {}", page_id, "Deleted.");
     return true;
   }
 }
@@ -334,8 +328,7 @@ auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
 auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_type) -> std::optional<WritePageGuard> {
   // UNIMPLEMENTED("TODO(P1): Add implementation.");
 
-  std::cout << "[Thread " << std::this_thread::get_id() << "] " << "Call\t\t CheckedWritePage(" << page_id << ")"
-            << std::endl;
+  // DebugLog("Call\t\t CheckedWritePage({})", page_id);
 
   while (true) {
     frame_id_t frame_id{INVALID_FRAME_ID};
@@ -347,56 +340,58 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
       if (frame_id == INVALID_FRAME_ID) {
         frame_id = AcquireNewFrameUnsafe();
         if (frame_id == INVALID_FRAME_ID) {
-          std::cout << "[Thread " << std::this_thread::get_id() << "] " << "Fail\t\t CheckedWritePage(" << page_id
-                    << "): Not enough memory." << std::endl;
+          // DebugLog("Fail\t\t CheckedWritePage({}) : {}", page_id, "Not enough memory.");
           return std::nullopt;
         }
         is_acquired = true;
       }
-    }
-    {
-      // Validation.
       FrameHeader &frame{*frames_[frame_id]};
-      // Validation passed.
-      std::lock_guard<std::shared_mutex> frame_guard{frames_[frame_id]->rwlatch_};
-      if (is_acquired) {
-        if (frame.pin_count_.load(std::memory_order_relaxed) > 0) {
-          continue;
+      if (!is_acquired) {
+        if (frame.pin_count_.fetch_add(1, std::memory_order_relaxed) == 0) {
+          replacer_->SetEvictable(frame_id, false);
         }
+      }
+    }
+
+    if (is_acquired) {
+      {
+        std::lock_guard<std::shared_mutex> frame_guard{frames_[frame_id]->rwlatch_};
+        FrameHeader &frame{*frames_[frame_id]};
         old_page_id = frame.page_id_;
         if (frame.page_id_ != INVALID_PAGE_ID) {
           FlushPageUnsafe(frame.page_id_, frame_id);
         }
-        frame.Reset();
-        frame.page_id_ = page_id;
-        FetchPageUnsafe(page_id, frame_id);
         {
           std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
+          if (frame.pin_count_.load(std::memory_order_relaxed) > 0) {
+            continue;
+          }
+          frame_id_t check_id{FindFrameUnsafe(page_id)};
+          if (check_id != INVALID_FRAME_ID && check_id != frame_id) {
+            // replacer_->SetEvictable(frame_id, true);
+            // continue;
+            if (frame.page_id_ == INVALID_PAGE_ID) {  // 来自 `free_frames_`
+              free_frames_.emplace_back(frame_id);
+            } else {  // 来自 Evict
+              replacer_->SetEvictable(frame_id, true);
+            }
+            continue;
+          }
           ReleaseNewFrameUnsafe(old_page_id, page_id, frame_id, false);
           if (frame.pin_count_.fetch_add(1, std::memory_order_relaxed) == 0) {
             replacer_->SetEvictable(frame_id, false);
           }
+          // replacer_->RecordAccess(frame_id);
         }
-      } else {
-        // Validation.
-        {
-          std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
-          frame_id_t check_id{FindFrameUnsafe(page_id)};
-          if (frame_id != check_id) {
-            continue;
-          }
-          if (frame.pin_count_.fetch_add(1, std::memory_order_relaxed) == 0) {
-            replacer_->SetEvictable(frame_id, false);
-          }
-        }
-        // Validation passed.
+        frame.Reset();
+        frame.page_id_ = page_id;
+        FetchPageUnsafe(page_id, frame_id);
       }
     }
 
-    replacer_->RecordAccess(frame_id);
     WritePageGuard pg{page_id, frames_[frame_id], replacer_, bpm_latch_};
-    std::cout << "[Thread " << std::this_thread::get_id() << "] " << "OK\t\t CheckedWritePage(" << page_id << ")"
-              << std::endl;
+
+    // DebugLog("OK\t\t CheckedWritePage({})", page_id);
     return std::make_optional(std::move(pg));
   }
 }
@@ -428,8 +423,7 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
 auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_type) -> std::optional<ReadPageGuard> {
   // UNIMPLEMENTED("TODO(P1): Add implementation.");
 
-  std::cout << "[Thread " << std::this_thread::get_id() << "] " << "Call\t\t CheckedReadPage(" << page_id << ")"
-            << std::endl;
+  // DebugLog("Call\t\t CheckedReadPage({})", page_id);
 
   while (true) {
     frame_id_t frame_id{INVALID_FRAME_ID};
@@ -441,56 +435,59 @@ auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_typ
       if (frame_id == INVALID_FRAME_ID) {
         frame_id = AcquireNewFrameUnsafe();
         if (frame_id == INVALID_FRAME_ID) {
-          std::cout << "[Thread " << std::this_thread::get_id() << "] " << "Fail\t\t CheckedReadPage(" << page_id
-                    << "): Not enough memory." << std::endl;
+          // DebugLog("Failed\t\t CheckedReadPage({}) : {}", page_id, "Not enough memory.");
           return std::nullopt;
         }
         is_acquired = true;
       }
-    }
-    {  // 此处有误，若是通过 FindFrameUnsafe 找到的 frame, 不应该上 writer 锁.
-      std::lock_guard<std::shared_mutex> frame_guard{frames_[frame_id]->rwlatch_};
-      // Validation.
       FrameHeader &frame{*frames_[frame_id]};
-      // Validation passed.
-      if (is_acquired) {
-        if (frame.pin_count_.load(std::memory_order_relaxed) > 0) {
-          continue;
+      if (!is_acquired) {
+        if (frame.pin_count_.fetch_add(1, std::memory_order_relaxed) == 0) {
+          replacer_->SetEvictable(frame_id, false);
         }
+      }
+    }
+
+    if (is_acquired) {
+      {
+        std::lock_guard<std::shared_mutex> frame_guard{frames_[frame_id]->rwlatch_};
+        FrameHeader &frame{*frames_[frame_id]};
         old_page_id = frame.page_id_;
         if (frame.page_id_ != INVALID_PAGE_ID) {
           FlushPageUnsafe(frame.page_id_, frame_id);
         }
-        frame.Reset();
-        frame.page_id_ = page_id;
-        FetchPageUnsafe(page_id, frame_id);
         {
           std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
+          // 防止当前 frame 对应 page 已被另一线程 Pin, 不可换出
+          if (frame.pin_count_.load(std::memory_order_relaxed) > 0) {
+            continue;
+          }
+          // 防止当前 page 已经被另一线程换入到已有的 frame 里
+          frame_id_t check_id{FindFrameUnsafe(page_id)};
+          if (check_id != INVALID_FRAME_ID && check_id != frame_id) {
+            // replacer_->SetEvictable(frame_id, true);
+            // continue;
+            if (frame.page_id_ == INVALID_PAGE_ID) {  // 来自 `free_frames_`
+              free_frames_.emplace_back(frame_id);
+            } else {  // 来自 Evict
+              replacer_->SetEvictable(frame_id, true);
+            }
+            continue;
+          }
           ReleaseNewFrameUnsafe(old_page_id, page_id, frame_id, false);
           if (frame.pin_count_.fetch_add(1, std::memory_order_relaxed) == 0) {
             replacer_->SetEvictable(frame_id, false);
           }
+          // replacer_->RecordAccess(frame_id); // 转移到 PageGuard 里 record
         }
-      } else {
-        // Validation.
-        {
-          std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
-          frame_id_t check_id{FindFrameUnsafe(page_id)};
-          if (frame_id != check_id) {
-            continue;
-          }
-          if (frame.pin_count_.fetch_add(1, std::memory_order_relaxed) == 0) {
-            replacer_->SetEvictable(frame_id, false);
-          }
-        }
-        // Validation passed.
+        frame.Reset();
+        frame.page_id_ = page_id;
+        FetchPageUnsafe(page_id, frame_id);
       }
     }
 
-    replacer_->RecordAccess(frame_id);
     ReadPageGuard pg{page_id, frames_[frame_id], replacer_, bpm_latch_};
-    std::cout << "[Thread " << std::this_thread::get_id() << "] " << "OK\t\t CheckedReadPage(" << page_id << ")"
-              << std::endl;
+    // DebugLog("OK\t\t CheckedReadPage({})", page_id);
     return std::make_optional(std::move(pg));
   }
 }
@@ -568,27 +565,26 @@ auto BufferPoolManager::ReadPage(page_id_t page_id, AccessType access_type) -> R
 auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool {
   // UNIMPLEMENTED("TODO(P1): Add implementation.");
 
-  std::cout << "[Thread " << std::this_thread::get_id() << "] " << "Call\t\t FlushPage(" << page_id << ")" << std::endl;
+  // DebugLog("Call\t\t FlushPage({})", page_id);
 
   frame_id_t frame_id{INVALID_FRAME_ID};
   {
     std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
     frame_id = FindFrameUnsafe(page_id);
     if (frame_id == INVALID_FRAME_ID) {
-      std::cout << "[Thread " << std::this_thread::get_id() << "] " << "Fail\t\t FlushPage(" << page_id
-                << "): Page is not in memory." << std::endl;
+      // DebugLog("Failed\t\t FlushPage({}) : {}", page_id, "Page is not in memory.");
       return false;
     }
   }
 
-  // Don't lock frame.
+  // {
+  // std::shared_lock<std::shared_mutex> frame_guard{frames_[frame_id]->rwlatch_};
   FrameHeader &frame{*frames_[frame_id]};
   FlushPageUnsafe(page_id, frame_id);
   frame.is_dirty_ = false;
-  std::cout << "[Thread " << std::this_thread::get_id() << "] " << "OK\t\t FlushPage(" << page_id << "): Flushed."
-            << std::endl;
-  std::cout << "[Thread " << std::this_thread::get_id() << "] " << "\t\t" << frame.GetData() << std::endl;
+  // DebugLog("OK\t\t FlushPage({}) : Data: {}", page_id, frame.GetData());
   return true;
+  // }
 }
 
 /**
@@ -604,7 +600,7 @@ auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool {
 void BufferPoolManager::FlushAllPages() {
   // UNIMPLEMENTED("TODO(P1): Add implementation.");
 
-  std::cout << "[Thread " << std::this_thread::get_id() << "] " << "Call\t\t FlushAllPages()" << std::endl;
+  // DebugLog("Call\t\t FlushAllPages()");
 
   for (auto &frame_ptr : frames_) {
     {
@@ -616,7 +612,7 @@ void BufferPoolManager::FlushAllPages() {
       frame_ptr->is_dirty_ = false;
     }
   }
-  std::cout << "[Thread " << std::this_thread::get_id() << "] " << "OK\t\t FlushAllPages()" << std::endl;
+  // DebugLog("OK\t\t FlushAllPages()");
 }
 
 /**
@@ -645,21 +641,20 @@ void BufferPoolManager::FlushAllPages() {
  */
 auto BufferPoolManager::GetPinCount(page_id_t page_id) -> std::optional<size_t> {
   // UNIMPLEMENTED("TODO(P1): Add implementation.");
-  std::cout << "[Thread " << std::this_thread::get_id() << "] " << "Call\t\t GetPinCount(" << page_id << ")"
-            << std::endl;
+
+  // DebugLog("Call\t\t GetPinCount({})", page_id);
 
   {
     std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
     frame_id_t frame_id{FindFrameUnsafe(page_id)};
     if (frame_id == INVALID_FRAME_ID) {
-      std::cout << "[Thread " << std::this_thread::get_id() << "] " << "Fail\t\t GetPinCount(" << page_id
-                << "): Page is not in memory." << std::endl;
+      // DebugLog("Failed\t\t GetPinCount({}) : {}", page_id, "Page is not in memory.");
+
       return std::nullopt;
     }
     FrameHeader &frame{*frames_[frame_id]};
     size_t res{frame.pin_count_.load(std::memory_order_relaxed)};
-    std::cout << "[Thread " << std::this_thread::get_id() << "] " << "OK\t\t GetPinCount(" << page_id << "): " << res
-              << "." << std::endl;
+    // DebugLog("OK\t\t GetPinCount({})", page_id);
 
     return std::make_optional(res);
   }
