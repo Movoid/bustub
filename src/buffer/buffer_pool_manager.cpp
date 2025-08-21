@@ -132,6 +132,9 @@ auto BufferPoolManager::FetchPageUnsafe(page_id_t page_id, frame_id_t frame_id) 
  */
 auto BufferPoolManager::FlushPageUnsafe(page_id_t page_id, frame_id_t frame_id) -> bool {
   FrameHeader &frame{*frames_[frame_id]};
+  if (!frame.is_dirty_) {
+    return true;
+  }
   auto p{disk_scheduler_->CreatePromise()};
   std::future<bool> fut{p.get_future()};
   DiskRequest req{true, frame.GetDataMut(), page_id, std::move(p)};
@@ -361,6 +364,7 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
         if (frame.page_id_ != INVALID_PAGE_ID) {
           FlushPageUnsafe(frame.page_id_, frame_id);
         }
+        frame.is_dirty_ = false;
         {
           std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
           if (frame.pin_count_.load(std::memory_order_relaxed) > 0) {
@@ -383,7 +387,7 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
           }
           // replacer_->RecordAccess(frame_id);
         }
-        frame.Reset();
+        // frame.Reset();
         frame.page_id_ = page_id;
         FetchPageUnsafe(page_id, frame_id);
       }
@@ -456,6 +460,7 @@ auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_typ
         if (frame.page_id_ != INVALID_PAGE_ID) {
           FlushPageUnsafe(frame.page_id_, frame_id);
         }
+        frame.is_dirty_ = false;
         {
           std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
           // 防止当前 frame 对应 page 已被另一线程 Pin, 不可换出
@@ -480,7 +485,7 @@ auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_typ
           }
           // replacer_->RecordAccess(frame_id); // 转移到 PageGuard 里 record
         }
-        frame.Reset();
+        // frame.Reset();
         frame.page_id_ = page_id;
         FetchPageUnsafe(page_id, frame_id);
       }

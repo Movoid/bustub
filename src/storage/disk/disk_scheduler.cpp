@@ -14,6 +14,9 @@
 #include "common/exception.h"
 #include "storage/disk/disk_manager.h"
 
+#define CUSTOM_LOG
+#include "common/custom_debug.h"
+
 namespace bustub {
 
 DiskScheduler::DiskScheduler(DiskManager *disk_manager) : disk_manager_(disk_manager) {
@@ -58,8 +61,10 @@ void DiskScheduler::StartWorkerThread() {
       // call disk_manager to process the task.
       auto &diskreq{task.value()};
       if (task->is_write_) {
+        DebugLog("DiskIO : Write page id {}", diskreq.page_id_);
         disk_manager_->WritePage(diskreq.page_id_, diskreq.data_);
       } else {
+        DebugLog("DiskIO : Read page id {}", diskreq.page_id_);
         disk_manager_->ReadPage(diskreq.page_id_, diskreq.data_);
       }
       diskreq.callback_.set_value(true);

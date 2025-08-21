@@ -6,7 +6,7 @@
 
 extern std::mutex debuglog_mutex;
 
-#if defined(CUSTOM_LOG) && !defined(NDEBUG)
+#if defined(CUSTOM_LOG)
 template <typename... Args>
 void DebugLog(Args &&...args) {
   {
