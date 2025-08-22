@@ -55,10 +55,10 @@ ReadPageGuard::ReadPageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> fra
   //   }
   // }
   // frame_->rwlatch_.lock_shared();
-  {
-    std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
-    replacer_->RecordAccess(frame_->frame_id_);
-  }
+  // {
+  // std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
+  // replacer_->RecordAccess(frame_->frame_id_);
+  // }
   is_valid_ = true;
 }
 
@@ -218,10 +218,10 @@ WritePageGuard::WritePageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> f
   // if (frame_->pin_count_.fetch_add(1, std::memory_order_relaxed) == 0) {
   //   replacer_->SetEvictable(frame_->frame_id_, false);
   // }
-  {
-    std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
-    replacer_->RecordAccess(frame_->frame_id_);
-  }
+  // {
+  //   std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
+  //   replacer_->RecordAccess(frame_->frame_id_);
+  // }
   frame_->is_dirty_ = true;
   is_valid_ = true;
 }

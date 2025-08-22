@@ -15,6 +15,7 @@
 #include <list>
 #include <memory>
 #include <shared_mutex>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -160,8 +161,8 @@ class BufferPoolManager {
   auto FetchPageUnsafe(page_id_t page_id, frame_id_t frame_id) -> bool;
   auto FlushPageUnsafe(page_id_t page_id, frame_id_t frame_id) -> bool;
 
-  // auto FetchPageAsyncUnsafe(page_id_t page_id, frame_id_t frame_id) -> std::future<bool>;
-  // auto FlushPageAsyncUnsafe(page_id_t page_id, frame_id_t frame_id) -> std::future<bool>;
+  auto FetchPageAsyncUnsafe(page_id_t page_id, frame_id_t frame_id) -> std::future<bool>;
+  auto FlushPageAsyncUnsafe(page_id_t page_id, frame_id_t frame_id) -> std::future<bool>;
 
   auto AcquireNewFrameUnsafe() -> frame_id_t;
   void ReleaseNewFrameUnsafe(page_id_t old_page_id, page_id_t page_id, frame_id_t frame_id, bool set_evictable);

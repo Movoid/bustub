@@ -11,7 +11,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "storage/disk/disk_scheduler.h"
+#include <chrono>
 #include "common/exception.h"
+#include "common/macros.h"
 #include "storage/disk/disk_manager.h"
 
 #define CUSTOM_LOG
@@ -21,20 +23,17 @@ namespace bustub {
 
 DiskScheduler::DiskScheduler(DiskManager *disk_manager) : disk_manager_(disk_manager) {
   // TODO(P1): remove this line after you have implemented the disk scheduler API
-  // throw NotImplementedException(
-  //     "DiskScheduler is not implemented yet. If you have finished implementing the disk scheduler, please remove the
-  //     " "throw exception line in `disk_scheduler.cpp`.");
-
   // Spawn the background thread
   background_thread_.emplace([&] { StartWorkerThread(); });
 }
 
 DiskScheduler::~DiskScheduler() {
-  // Put a `std::nullopt` in the queue to signal to exit the loop
-  request_queue_.Put(std::nullopt);
-  if (background_thread_.has_value()) {
-    background_thread_->join();
+  {
+    std::lock_guard<std::mutex> awaited_lk{awaited_m_};
+    stop_ = true;
+    cond_.notify_one();
   }
+  background_thread_->join();
 }
 
 /**
@@ -44,7 +43,26 @@ DiskScheduler::~DiskScheduler() {
  *
  * @param r The request to be scheduled.
  */
-void DiskScheduler::Schedule(DiskRequest r) { request_queue_.Put(std::make_optional(std::move(r))); }
+void DiskScheduler::Schedule(DiskRequest r) {
+  // if (r.is_write_) {
+  //   DebugLog("Submitting write task, page {} .", r.page_id_);
+  // } else {
+  //   DebugLog("Submitting read task, page {} .", r.page_id_);
+  // }
+
+  {
+    std::lock_guard<std::mutex> queues_lk{queues_m_};
+    page_id_t page_id{r.page_id_};
+    {
+      std::lock_guard<std::mutex> awaited_lk{awaited_m_};
+      if (queues_[page_id].empty()) {
+        awaited_.emplace(page_id);
+        cond_.notify_one();
+      }
+    }
+    queues_[page_id].emplace(std::move(r));
+  }
+}
 
 /**
  * TODO(P1): Add implementation
@@ -53,25 +71,73 @@ void DiskScheduler::Schedule(DiskRequest r) { request_queue_.Put(std::make_optio
  *
  * The background thread needs to process requests while the DiskScheduler exists, i.e., this function should not
  * return until ~DiskScheduler() is called. At that point you need to make sure that the function does return.
+ *
+ * 注意, 只允许单线程, 否则需要处理 `cur_iter` 因 Race 导致的失效.
  */
 void DiskScheduler::StartWorkerThread() {
+  DiskRequest diskreq;
+  page_id_t cur_page_id{};
+  std::set<page_id_t>::iterator cur_iter{};
   while (true) {
-    std::optional<DiskRequest> task{request_queue_.Get()};
-    if (task.has_value()) {
-      // call disk_manager to process the task.
-      auto &diskreq{task.value()};
-      if (task->is_write_) {
-        DebugLog("DiskIO : Write page id {}", diskreq.page_id_);
-        disk_manager_->WritePage(diskreq.page_id_, diskreq.data_);
+    {
+      std::unique_lock<std::mutex> awaited_lk{awaited_m_};
+      cond_.wait(awaited_lk, [&] { return stop_ || !awaited_.empty(); });
+
+      if (stop_ && awaited_.empty()) {
+        break;
+      }
+
+      BUSTUB_ASSERT(awaited_.begin() != awaited_.end(), "Scheduler");
+
+      if (next_iter_ == awaited_.end()) {
+        if (to_high_) {
+          to_high_ = false;
+          next_iter_ = std::prev(awaited_.end());
+        } else {
+          to_high_ = true;
+          next_iter_ = awaited_.begin();
+        }
+      }
+
+      cur_iter = next_iter_;
+      if (to_high_) {
+        next_iter_ = std::next(next_iter_);
       } else {
-        DebugLog("DiskIO : Read page id {}", diskreq.page_id_);
+        next_iter_ = next_iter_ == awaited_.begin() ? awaited_.end() : std::prev(next_iter_);
+      }
+
+      cur_page_id = *cur_iter;
+    }
+    // Get a DiskRequest.
+    int cnt{};
+    while (true) {
+      {
+        std::lock_guard<std::mutex> queues_lk{queues_m_};
+        {
+          std::lock_guard<std::mutex> awaited_lk{awaited_m_};
+          if (queues_[cur_page_id].empty()) {
+            awaited_.erase(cur_iter);  // Iterator is always valid.
+            break;
+          }
+        }
+        diskreq = std::move(queues_[cur_page_id].front());
+        cnt++;
+        queues_[cur_page_id].pop();
+      }
+      if (diskreq.is_write_) {
+        disk_manager_->WritePage(diskreq.page_id_, diskreq.data_);
+        // DebugLog("Finished write page {}.", diskreq.page_id_);
+      } else {
         disk_manager_->ReadPage(diskreq.page_id_, diskreq.data_);
+        // DebugLog("Finished read page {}.", diskreq.page_id_);
       }
       diskreq.callback_.set_value(true);
-    } else {
-      break;
+
+      if (cnt > 10) {
+        break;
+      }
     }
+    std::this_thread::sleep_for(std::chrono::seconds{1});
   }
 }
-
 }  // namespace bustub

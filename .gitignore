@@ -244,3 +244,7 @@ docs/dev
 
 # Submission zip files
 *.zip
+
+
+# log
+*.log

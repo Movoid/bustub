@@ -12,11 +12,13 @@
 
 #pragma once
 
-#include <future>  // NOLINT
+#include <mutex>
 #include <optional>
-#include <thread>  // NOLINT
+#include <queue>
+#include <set>
+#include <unordered_map>
 
-#include "common/channel.h"
+// #include "common/channel.h"
 #include "storage/disk/disk_manager.h"
 
 namespace bustub {
@@ -89,7 +91,21 @@ class DiskScheduler {
   DiskManager *disk_manager_ __attribute__((__unused__));
   /** A shared queue to concurrently schedule and process requests. When the DiskScheduler's destructor is called,
    * `std::nullopt` is put into the queue to signal to the background thread to stop execution. */
-  Channel<std::optional<DiskRequest>> request_queue_;
+  // Channel<std::optional<DiskRequest>> request_queue_;
+
+  /* Elevator scheduler. */
+
+  std::unordered_map<page_id_t, std::queue<DiskRequest>> queues_;
+  std::mutex queues_m_;
+
+  std::set<page_id_t> awaited_;
+  std::set<page_id_t>::iterator next_iter_{awaited_.end()};
+  std::mutex awaited_m_;
+  std::condition_variable cond_;
+
+  bool to_high_{true};
+  bool stop_{};
+
   /** The background thread responsible for issuing scheduled requests to the disk manager. */
   std::optional<std::thread> background_thread_;
 };
