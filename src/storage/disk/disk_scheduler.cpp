@@ -11,23 +11,24 @@
 //
 //===----------------------------------------------------------------------===//
 
+// #define CUSTOM_LOG
+// #include "common/custom_debug.h"
+
 #include "storage/disk/disk_scheduler.h"
 #include <chrono>
 #include "common/exception.h"
 #include "common/macros.h"
 #include "storage/disk/disk_manager.h"
 
-// #define CUSTOM_LOG
-// #include "common/custom_debug.h"
-
 namespace bustub {
 
 DiskScheduler::DiskScheduler(DiskManager *disk_manager) : disk_manager_(disk_manager) {
-  // TODO(P1): remove this line after you have implemented the disk scheduler API
-  // Spawn the background thread
-  // background_thread_.emplace([&] { StartWorkerThread(); });
-  for (auto &worker : workers_) {
-    worker = std::thread{[&] { StartWorkerThread(); }};
+  // for (auto &worker : workers_) {
+  //   worker = std::thread{[&] { StartWorkerThread(); }};
+  // }
+  std::cout << "Concurrency: " << std::thread::hardware_concurrency() << std::endl;
+  for (size_t i = 0; i < 16; i++) {
+    workers_[i] = std::thread{[&] { StartWorkerThread(); }};
   }
 }
 
@@ -37,9 +38,8 @@ DiskScheduler::~DiskScheduler() {
     stop_ = true;
     cond_.notify_all();
   }
-  // background_thread_->join();
-  for (auto &worker : workers_) {
-    worker.join();
+  for (size_t i = 0; i < 16; i++) {
+    workers_[i].join();
   }
 }
 
@@ -51,12 +51,6 @@ DiskScheduler::~DiskScheduler() {
  * @param r The request to be scheduled.
  */
 void DiskScheduler::Schedule(DiskRequest r) {
-  // if (r.is_write_) {
-  //   DebugLog("Submitting write task, page {} .", r.page_id_);
-  // } else {
-  //   DebugLog("Submitting read task, page {} .", r.page_id_);
-  // }
-
   {
     std::lock_guard<std::mutex> queues_lk{queues_m_};
     page_id_t page_id{r.page_id_};
@@ -87,7 +81,6 @@ void DiskScheduler::StartWorkerThread() {
   while (true) {
     {
       std::unique_lock<std::mutex> awaited_lk{awaited_m_};
-      // std::set<page_id_t>::iterator cur_iter{};
       cond_.wait(awaited_lk, [&] { return stop_ || !awaited_.empty(); });
 
       if (stop_ && awaited_.empty()) {
@@ -105,10 +98,6 @@ void DiskScheduler::StartWorkerThread() {
           next_iter_ = awaited_.begin();
         }
       }
-
-      // cur_iter = next_iter_;
-      // cur_page_id = *cur_iter;
-
       cur_page_id = *next_iter_;
       if (to_high_) {
         next_iter_ = std::next(next_iter_);
@@ -116,7 +105,6 @@ void DiskScheduler::StartWorkerThread() {
         next_iter_ = next_iter_ == awaited_.begin() ? awaited_.end() : std::prev(next_iter_);
       }
     }
-    // Get a DiskRequest.
     int cnt{};
     while (true) {
       {
@@ -128,7 +116,6 @@ void DiskScheduler::StartWorkerThread() {
             break;
           }
           if (queues_[cur_page_id].empty()) {
-            // awaited_.erase(cur_iter);  // Iterator is always valid.
             if (iter == next_iter_) {
               next_iter_ = std::next(next_iter_);
             }
@@ -142,13 +129,10 @@ void DiskScheduler::StartWorkerThread() {
       }
       if (diskreq.is_write_) {
         disk_manager_->WritePage(diskreq.page_id_, diskreq.data_);
-        // DebugLog("Finished write page {}.", diskreq.page_id_);
       } else {
         disk_manager_->ReadPage(diskreq.page_id_, diskreq.data_);
-        // DebugLog("Finished read page {}.", diskreq.page_id_);
       }
       diskreq.callback_.set_value(true);
-
       if (cnt > 10) {
         break;
       }

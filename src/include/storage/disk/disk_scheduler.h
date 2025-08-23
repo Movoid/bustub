@@ -94,8 +94,6 @@ class DiskScheduler {
    * `std::nullopt` is put into the queue to signal to the background thread to stop execution. */
   // Channel<std::optional<DiskRequest>> request_queue_;
 
-  /* Elevator scheduler. */
-
   std::unordered_map<page_id_t, std::queue<DiskRequest>> queues_;
   std::mutex queues_m_;
 
@@ -109,6 +107,6 @@ class DiskScheduler {
 
   /** The background thread responsible for issuing scheduled requests to the disk manager. */
   // std::optional<std::thread> background_thread_;
-  std::array<std::thread, 8> workers_;
+  std::array<std::thread, 40> workers_;
 };
 }  // namespace bustub
