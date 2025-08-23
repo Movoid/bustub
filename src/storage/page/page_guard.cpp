@@ -177,9 +177,12 @@ void ReadPageGuard::Drop() {
   // DebugLog("OK\t\t Reader Drop of page {}", page_id_);
   {
     std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
-    if (frame_->pin_count_.fetch_sub(1, std::memory_order_relaxed) == 1) {
-      // 注意此处可能的 Race: 另一个线程访问此 frame, 并设置 false evictable.
-      // 通过 `bpm_latch_` 阻止.
+    // if (frame_->pin_count_.fetch_sub(1, std::memory_order_relaxed) == 1) {
+    //   // 注意此处可能的 Race: 另一个线程访问此 frame, 并设置 false evictable.
+    //   // 通过 `bpm_latch_` 阻止.
+    //   replacer_->SetEvictable(frame_->frame_id_, true);
+    // }
+    if (frame_->pin_count_-- == 1) {
       replacer_->SetEvictable(frame_->frame_id_, true);
     }
   }
@@ -349,7 +352,10 @@ void WritePageGuard::Drop() {
   lock_holder_.unlock();
   {
     std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
-    if (frame_->pin_count_.fetch_sub(1, std::memory_order_relaxed) == 1) {
+    // if (frame_->pin_count_.fetch_sub(1, std::memory_order_relaxed) == 1) {
+    //   replacer_->SetEvictable(frame_->frame_id_, true);
+    // }
+    if (frame_->pin_count_-- == 1) {
       replacer_->SetEvictable(frame_->frame_id_, true);
     }
   }

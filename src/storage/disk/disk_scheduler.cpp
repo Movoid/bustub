@@ -1,3 +1,4 @@
+
 //===----------------------------------------------------------------------===//
 //
 //                         BusTub
@@ -16,24 +17,30 @@
 #include "common/macros.h"
 #include "storage/disk/disk_manager.h"
 
-#define CUSTOM_LOG
-#include "common/custom_debug.h"
+// #define CUSTOM_LOG
+// #include "common/custom_debug.h"
 
 namespace bustub {
 
 DiskScheduler::DiskScheduler(DiskManager *disk_manager) : disk_manager_(disk_manager) {
   // TODO(P1): remove this line after you have implemented the disk scheduler API
   // Spawn the background thread
-  background_thread_.emplace([&] { StartWorkerThread(); });
+  // background_thread_.emplace([&] { StartWorkerThread(); });
+  for (auto &worker : workers_) {
+    worker = std::thread{[&] { StartWorkerThread(); }};
+  }
 }
 
 DiskScheduler::~DiskScheduler() {
   {
     std::lock_guard<std::mutex> awaited_lk{awaited_m_};
     stop_ = true;
-    cond_.notify_one();
+    cond_.notify_all();
   }
-  background_thread_->join();
+  // background_thread_->join();
+  for (auto &worker : workers_) {
+    worker.join();
+  }
 }
 
 /**
@@ -77,10 +84,10 @@ void DiskScheduler::Schedule(DiskRequest r) {
 void DiskScheduler::StartWorkerThread() {
   DiskRequest diskreq;
   page_id_t cur_page_id{};
-  std::set<page_id_t>::iterator cur_iter{};
   while (true) {
     {
       std::unique_lock<std::mutex> awaited_lk{awaited_m_};
+      // std::set<page_id_t>::iterator cur_iter{};
       cond_.wait(awaited_lk, [&] { return stop_ || !awaited_.empty(); });
 
       if (stop_ && awaited_.empty()) {
@@ -99,14 +106,15 @@ void DiskScheduler::StartWorkerThread() {
         }
       }
 
-      cur_iter = next_iter_;
+      // cur_iter = next_iter_;
+      // cur_page_id = *cur_iter;
+
+      cur_page_id = *next_iter_;
       if (to_high_) {
         next_iter_ = std::next(next_iter_);
       } else {
         next_iter_ = next_iter_ == awaited_.begin() ? awaited_.end() : std::prev(next_iter_);
       }
-
-      cur_page_id = *cur_iter;
     }
     // Get a DiskRequest.
     int cnt{};
@@ -115,8 +123,16 @@ void DiskScheduler::StartWorkerThread() {
         std::lock_guard<std::mutex> queues_lk{queues_m_};
         {
           std::lock_guard<std::mutex> awaited_lk{awaited_m_};
+          auto iter{awaited_.find(cur_page_id)};
+          if (iter == awaited_.end()) {
+            break;
+          }
           if (queues_[cur_page_id].empty()) {
-            awaited_.erase(cur_iter);  // Iterator is always valid.
+            // awaited_.erase(cur_iter);  // Iterator is always valid.
+            if (iter == next_iter_) {
+              next_iter_ = std::next(next_iter_);
+            }
+            awaited_.erase(iter);
             break;
           }
         }
@@ -137,7 +153,6 @@ void DiskScheduler::StartWorkerThread() {
         break;
       }
     }
-    std::this_thread::sleep_for(std::chrono::seconds{1});
   }
 }
 }  // namespace bustub

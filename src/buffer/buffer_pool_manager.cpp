@@ -12,8 +12,8 @@
 
 #include "buffer/buffer_pool_manager.h"
 
-#define CUSTOM_LOG
-#include "common/custom_debug.h"
+// #define CUSTOM_LOG
+// #include "common/custom_debug.h"
 
 namespace bustub {
 
@@ -24,9 +24,7 @@ namespace bustub {
  *
  * @param frame_id The frame ID / index of the frame we are creating a header for.
  */
-FrameHeader::FrameHeader(frame_id_t frame_id) : frame_id_(frame_id), pin_count_{0}, data_(BUSTUB_PAGE_SIZE, 0) {
-  Reset();
-}
+FrameHeader::FrameHeader(frame_id_t frame_id) : frame_id_(frame_id), data_(BUSTUB_PAGE_SIZE, 0) { Reset(); }
 
 /**
  * @brief Get a raw const pointer to the frame's data.
@@ -277,7 +275,10 @@ auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
         return true;
       }
       FrameHeader &frame{*frames_[frame_id]};
-      if (frame.pin_count_.load(std::memory_order_relaxed) > 0) {
+      // if (frame.pin_count_.load(std::memory_order_relaxed) > 0) {
+      //   return false;
+      // }
+      if (frame.pin_count_ > 0) {
         return false;
       }
     }
@@ -292,7 +293,10 @@ auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
           // DebugLog("!!! DeletePage({}) fallback", page_id);
           continue;
         }
-        if (frame.pin_count_.load(std::memory_order_relaxed) > 0) {
+        // if (frame.pin_count_.load(std::memory_order_relaxed) > 0) {
+        //   return false;
+        // }
+        if (frame.pin_count_ > 0) {
           return false;
         }
 
@@ -370,7 +374,10 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
       }
       FrameHeader &frame{*frames_[frame_id]};
       if (!is_acquired) {
-        if (frame.pin_count_.fetch_add(1, std::memory_order_relaxed) == 0) {
+        // if (frame.pin_count_.fetch_add(1, std::memory_order_relaxed) == 0) {
+        //   replacer_->SetEvictable(frame_id, false);
+        // }
+        if (frame.pin_count_++ == 0) {
           replacer_->SetEvictable(frame_id, false);
         }
       }
@@ -390,8 +397,11 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
         // DebugLog("Info CheckedWritePage({}) lock bpm.", page_id);
         {
           std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
-          if (frame.pin_count_.load(std::memory_order_relaxed) > 0) {
-            // DebugLog("!!! CheckedWritePage({}) fallback", page_id);
+          // if (frame.pin_count_.load(std::memory_order_relaxed) > 0) {
+          //   // DebugLog("!!! CheckedWritePage({}) fallback", page_id);
+          //   continue;
+          // }
+          if (frame.pin_count_ > 0) {
             continue;
           }
           frame_id_t check_id{FindFrameUnsafe(page_id)};
@@ -408,7 +418,10 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
           }
           // DebugLog("Info CheckedWritePage({}) release new frame.", page_id);
           ReleaseNewFrameUnsafe(old_page_id, page_id, frame_id, false);
-          if (frame.pin_count_.fetch_add(1, std::memory_order_relaxed) == 0) {
+          // if (frame.pin_count_.fetch_add(1, std::memory_order_relaxed) == 0) {
+          //   replacer_->SetEvictable(frame_id, false);
+          // }
+          if (frame.pin_count_++ == 0) {
             replacer_->SetEvictable(frame_id, false);
           }
           // DebugLog("Info CheckedWritePage({}) record access.", page_id);
@@ -474,7 +487,10 @@ auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_typ
       }
       FrameHeader &frame{*frames_[frame_id]};
       if (!is_acquired) {
-        if (frame.pin_count_.fetch_add(1, std::memory_order_relaxed) == 0) {
+        // if (frame.pin_count_.fetch_add(1, std::memory_order_relaxed) == 0) {
+        //   replacer_->SetEvictable(frame_id, false);
+        // }
+        if (frame.pin_count_++ == 0) {
           replacer_->SetEvictable(frame_id, false);
         }
       }
@@ -492,8 +508,11 @@ auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_typ
         {
           std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
           // 防止当前 frame 对应 page 已被另一线程 Pin, 不可换出
-          if (frame.pin_count_.load(std::memory_order_relaxed) > 0) {
-            // DebugLog("!!! CheckedReadPage({}) fallback", page_id);
+          // if (frame.pin_count_.load(std::memory_order_relaxed) > 0) {
+          //   // DebugLog("!!! CheckedReadPage({}) fallback", page_id);
+          //   continue;
+          // }
+          if (frame.pin_count_ > 0) {
             continue;
           }
           // 防止当前 page 已经被另一线程换入到已有的 frame 里
@@ -510,7 +529,10 @@ auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_typ
             continue;
           }
           ReleaseNewFrameUnsafe(old_page_id, page_id, frame_id, false);
-          if (frame.pin_count_.fetch_add(1, std::memory_order_relaxed) == 0) {
+          // if (frame.pin_count_.fetch_add(1, std::memory_order_relaxed) == 0) {
+          //   replacer_->SetEvictable(frame_id, false);
+          // }
+          if (frame.pin_count_++ == 0) {
             replacer_->SetEvictable(frame_id, false);
           }
         }
@@ -688,7 +710,8 @@ auto BufferPoolManager::GetPinCount(page_id_t page_id) -> std::optional<size_t> 
       return std::nullopt;
     }
     FrameHeader &frame{*frames_[frame_id]};
-    size_t res{frame.pin_count_.load(std::memory_order_relaxed)};
+    // size_t res{frame.pin_count_.load(std::memory_order_relaxed)};
+    size_t res{frame.pin_count_};
     // DebugLog("OK\t\t GetPinCount({})", page_id);
 
     return std::make_optional(res);

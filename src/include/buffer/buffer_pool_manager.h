@@ -93,7 +93,8 @@ class FrameHeader {
    * 且必须用 `bpm_latch_` 保护原子操作,
    * 用 frame `rwlatch_` 会导致需要检查 `pin_count_` 时重复上锁死锁.
    */
-  std::atomic<size_t> pin_count_;
+  // std::atomic<size_t> pin_count_;
+  size_t pin_count_{};
 
   /** @brief The dirty flag.
    *

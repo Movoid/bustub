@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <array>
 #include <mutex>
 #include <optional>
 #include <queue>
@@ -107,6 +108,7 @@ class DiskScheduler {
   bool stop_{};
 
   /** The background thread responsible for issuing scheduled requests to the disk manager. */
-  std::optional<std::thread> background_thread_;
+  // std::optional<std::thread> background_thread_;
+  std::array<std::thread, 8> workers_;
 };
 }  // namespace bustub
