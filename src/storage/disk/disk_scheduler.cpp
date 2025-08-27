@@ -16,6 +16,7 @@
 
 #include "storage/disk/disk_scheduler.h"
 #include <chrono>
+#include <cstring>
 #include "common/exception.h"
 #include "common/macros.h"
 #include "storage/disk/disk_manager.h"
@@ -27,7 +28,7 @@ DiskScheduler::DiskScheduler(DiskManager *disk_manager) : disk_manager_(disk_man
   //   worker = std::thread{[&] { StartWorkerThread(); }};
   // }
   std::cout << "Concurrency: " << std::thread::hardware_concurrency() << std::endl;
-  for (size_t i = 0; i < 16; i++) {
+  for (size_t i = 0; i < 40; i++) {
     workers_[i] = std::thread{[&] { StartWorkerThread(); }};
   }
 }
@@ -38,7 +39,7 @@ DiskScheduler::~DiskScheduler() {
     stop_ = true;
     cond_.notify_all();
   }
-  for (size_t i = 0; i < 16; i++) {
+  for (size_t i = 0; i < 40; i++) {
     workers_[i].join();
   }
 }
@@ -51,17 +52,36 @@ DiskScheduler::~DiskScheduler() {
  * @param r The request to be scheduled.
  */
 void DiskScheduler::Schedule(DiskRequest r) {
+  TemporaryPageBuffer::Page *new_buf{};
+  if (r.is_write_) {
+    new_buf = fb_.Pop();
+  }
+
   {
     std::lock_guard<std::mutex> queues_lk{queues_m_};
     page_id_t page_id{r.page_id_};
+
+    /** Flush requests. */
+    if (r.is_write_) {
+      auto old_buf{temp_flush_buffer_[r.page_id_]};
+      if (old_buf == nullptr) {
+        std::memcpy(new_buf, r.data_, BUSTUB_PAGE_SIZE);
+        temp_flush_buffer_[r.page_id_] = new_buf;
+      } else {
+        std::memcpy(old_buf, r.data_, BUSTUB_PAGE_SIZE);
+        fb_.Push(new_buf);
+      }
+      r.data_ = nullptr;
+    }
+
     {
       std::lock_guard<std::mutex> awaited_lk{awaited_m_};
-      if (queues_[page_id].empty()) {
+      if (queues_[page_id].first.empty() && !queues_[page_id].second) {
         awaited_.emplace(page_id);
         cond_.notify_one();
       }
     }
-    queues_[page_id].emplace(std::move(r));
+    queues_[page_id].first.emplace(std::move(r));
   }
 }
 
@@ -72,8 +92,6 @@ void DiskScheduler::Schedule(DiskRequest r) {
  *
  * The background thread needs to process requests while the DiskScheduler exists, i.e., this function should not
  * return until ~DiskScheduler() is called. At that point you need to make sure that the function does return.
- *
- * 注意, 只允许单线程, 否则需要处理 `cur_iter` 因 Race 导致的失效.
  */
 void DiskScheduler::StartWorkerThread() {
   DiskRequest diskreq;
@@ -98,44 +116,52 @@ void DiskScheduler::StartWorkerThread() {
           next_iter_ = awaited_.begin();
         }
       }
-      cur_page_id = *next_iter_;
+
+      std::set<page_id_t>::iterator cur_iter{next_iter_};
+      cur_page_id = *cur_iter;
+
       if (to_high_) {
-        next_iter_ = std::next(next_iter_);
+        next_iter_ = std::next(cur_iter);
       } else {
-        next_iter_ = next_iter_ == awaited_.begin() ? awaited_.end() : std::prev(next_iter_);
+        next_iter_ = cur_iter == awaited_.begin() ? awaited_.end() : std::prev(cur_iter);
       }
+
+      awaited_.erase(cur_iter);
     }
-    int cnt{};
     while (true) {
+      TemporaryPageBuffer::Page *flush_buf{};
       {
         std::lock_guard<std::mutex> queues_lk{queues_m_};
-        {
-          std::lock_guard<std::mutex> awaited_lk{awaited_m_};
-          auto iter{awaited_.find(cur_page_id)};
-          if (iter == awaited_.end()) {
-            break;
-          }
-          if (queues_[cur_page_id].empty()) {
-            if (iter == next_iter_) {
-              next_iter_ = std::next(next_iter_);
-            }
-            awaited_.erase(iter);
-            break;
-          }
+        if (queues_[cur_page_id].first.empty()) {
+          queues_[cur_page_id].second = false;  // This position is important.
+          break;
         }
-        diskreq = std::move(queues_[cur_page_id].front());
-        cnt++;
-        queues_[cur_page_id].pop();
+        diskreq = std::move(queues_[cur_page_id].first.front());
+        queues_[cur_page_id].first.pop();
+        queues_[cur_page_id].second = true;
+        /** Hook flush requests. */
+        if (diskreq.is_write_) {
+          flush_buf = temp_flush_buffer_[cur_page_id];
+          temp_flush_buffer_[cur_page_id] = nullptr;
+        }
       }
-      if (diskreq.is_write_) {
-        disk_manager_->WritePage(diskreq.page_id_, diskreq.data_);
-      } else {
+      if (diskreq.dependency_.has_value()) {
+        diskreq.dependency_->get();
+      }
+      /**
+       * 注意此处, 执行 diskreq 时没有 queues_m_ 锁,
+       * 可能有线程判断 queue 为空, 并提交到 `awaited_`.
+       * 此 Race 可能存在于过去的 commits 中没有暴露.
+       */
+      if (diskreq.is_write_) {  // Flush
+        if (flush_buf != nullptr) {
+          disk_manager_->WritePage(diskreq.page_id_, flush_buf->data_);
+          fb_.Push(flush_buf);
+        }
+      } else {  // Fetch
         disk_manager_->ReadPage(diskreq.page_id_, diskreq.data_);
       }
       diskreq.callback_.set_value(true);
-      if (cnt > 10) {
-        break;
-      }
     }
   }
 }

@@ -45,6 +45,59 @@ struct DiskRequest {
 
   /** Callback used to signal to the request issuer when the request has been completed. */
   std::promise<bool> callback_;
+
+  /**  Dependency task. */
+  std::optional<std::future<bool>> dependency_{std::nullopt};
+};
+
+/**
+ * @brief A simple page allocator.
+ *
+ * This is only used in DiskScheduler temporary flush buffer.
+ */
+class TemporaryPageBuffer {
+ public:
+  struct Page {
+    alignas(64) char data_[BUSTUB_PAGE_SIZE];
+  };
+
+ private:
+  /** Not guaranteed to be clean. */
+  Page *base_{};
+  std::vector<Page *> free_;
+  std::mutex m_;
+  std::condition_variable cond_;
+
+ public:
+  explicit TemporaryPageBuffer(size_t page_cnt) {
+    base_ = new Page[page_cnt]{};
+    free_.reserve(page_cnt);
+    for (size_t i = 0; i < page_cnt; i++) {
+      free_.emplace_back(base_ + i);
+    }
+  }
+  ~TemporaryPageBuffer() { delete[] base_; }
+
+  TemporaryPageBuffer(const TemporaryPageBuffer &) = delete;
+  auto operator=(const TemporaryPageBuffer &) -> TemporaryPageBuffer & = delete;
+  TemporaryPageBuffer(TemporaryPageBuffer &) = delete;
+  auto operator=(TemporaryPageBuffer &&) -> TemporaryPageBuffer & = delete;
+
+  auto Pop() -> Page * {
+    std::unique_lock<std::mutex> lk{m_};
+    cond_.wait(lk, [&]() { return !free_.empty(); });
+    Page *ret{free_.back()};
+    free_.pop_back();
+    return ret;
+  }
+
+  void Push(Page *page) {
+    std::lock_guard<std::mutex> lk{m_};
+    free_.emplace_back(page);
+    if (free_.size() == 1) {
+      cond_.notify_one();
+    }
+  }
 };
 
 /**
@@ -94,7 +147,9 @@ class DiskScheduler {
    * `std::nullopt` is put into the queue to signal to the background thread to stop execution. */
   // Channel<std::optional<DiskRequest>> request_queue_;
 
-  std::unordered_map<page_id_t, std::queue<DiskRequest>> queues_;
+  std::unordered_map<page_id_t, std::pair<std::queue<DiskRequest>, bool>> queues_;
+  TemporaryPageBuffer fb_{64};
+  std::unordered_map<page_id_t, TemporaryPageBuffer::Page *> temp_flush_buffer_;
   std::mutex queues_m_;
 
   std::set<page_id_t> awaited_;
@@ -107,6 +162,6 @@ class DiskScheduler {
 
   /** The background thread responsible for issuing scheduled requests to the disk manager. */
   // std::optional<std::thread> background_thread_;
-  std::array<std::thread, 40> workers_;
+  std::array<std::thread, 80> workers_;
 };
 }  // namespace bustub

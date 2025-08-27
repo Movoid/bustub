@@ -140,6 +140,24 @@ auto BufferPoolManager::FlushPageUnsafe(page_id_t page_id, frame_id_t frame_id) 
   return true;
 }
 
+auto BufferPoolManager::FetchPageAsyncUnsafe(page_id_t page_id, frame_id_t frame_id) -> std::future<bool> {
+  FrameHeader &frame{*frames_[frame_id]};
+  auto p{disk_scheduler_->CreatePromise()};
+  std::future<bool> fut{p.get_future()};
+  DiskRequest req{false, frame.GetDataMut(), page_id, std::move(p)};
+  disk_scheduler_->Schedule(std::move(req));
+  return fut;
+}
+
+auto BufferPoolManager::FlushPageAsyncUnsafe(page_id_t page_id, frame_id_t frame_id) -> std::future<bool> {
+  FrameHeader &frame{*frames_[frame_id]};
+  auto p{disk_scheduler_->CreatePromise()};
+  std::future<bool> fut{p.get_future()};
+  DiskRequest req{true, frame.GetDataMut(), page_id, std::move(p)};
+  disk_scheduler_->Schedule(std::move(req));
+  return fut;
+}
+
 auto BufferPoolManager::AcquireNewFrameUnsafe() -> frame_id_t {
   frame_id_t frame_id{INVALID_FRAME_ID};
   if (free_frames_.empty()) {  // Evict.
@@ -200,7 +218,7 @@ auto BufferPoolManager::NewPage() -> page_id_t {
     FrameHeader &frame{*frames_[frame_id]};
     old_page_id = frame.page_id_;
     if (frame.page_id_ != INVALID_PAGE_ID && frame.is_dirty_) {
-      FlushPageUnsafe(frame.page_id_, frame_id);
+      FlushPageAsyncUnsafe(frame.page_id_, frame_id);
     }
     {
       std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
@@ -342,7 +360,7 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
         old_page_id = frame.page_id_;
         // 此处必须 Flush
         if (frame.page_id_ != INVALID_PAGE_ID && frame.is_dirty_) {
-          FlushPageUnsafe(frame.page_id_, frame_id);
+          FlushPageAsyncUnsafe(frame.page_id_, frame_id);
         }
         frame.is_dirty_ = false;
         {
@@ -367,7 +385,7 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
           }
         }
         frame.page_id_ = page_id;
-        FetchPageUnsafe(page_id, frame_id);
+        FetchPageAsyncUnsafe(page_id, frame_id).get();
       }
     }
 
@@ -431,7 +449,7 @@ auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_typ
         FrameHeader &frame{*frames_[frame_id]};
         old_page_id = frame.page_id_;
         if (frame.page_id_ != INVALID_PAGE_ID && frame.is_dirty_) {
-          FlushPageUnsafe(frame.page_id_, frame_id);
+          FlushPageAsyncUnsafe(frame.page_id_, frame_id);
         }
         frame.is_dirty_ = false;
         {
@@ -456,7 +474,7 @@ auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_typ
         }
 
         frame.page_id_ = page_id;
-        FetchPageUnsafe(page_id, frame_id);
+        FetchPageAsyncUnsafe(page_id, frame_id).get();
       }
     }
 
@@ -548,7 +566,7 @@ auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool {
   }
 
   FrameHeader &frame{*frames_[frame_id]};
-  FlushPageUnsafe(page_id, frame_id);
+  FlushPageAsyncUnsafe(page_id, frame_id);
   frame.is_dirty_ = false;
   return true;
 }
@@ -570,7 +588,7 @@ void BufferPoolManager::FlushAllPages() {
       if (frame_ptr->page_id_ == INVALID_PAGE_ID || !frame_ptr->is_dirty_) {
         continue;
       }
-      FlushPageUnsafe(frame_ptr->page_id_, frame_ptr->frame_id_);
+      FlushPageAsyncUnsafe(frame_ptr->page_id_, frame_ptr->frame_id_);
       frame_ptr->is_dirty_ = false;
     }
   }
