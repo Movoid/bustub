@@ -158,6 +158,9 @@ class BufferPoolManager {
   void FlushAllPages();
   auto GetPinCount(page_id_t page_id) -> std::optional<size_t>;
 
+  auto PinPage(page_id_t page_id) -> bool;
+  auto UnpinPage(page_id_t page_id) -> bool;
+
  private:
   auto FetchPageUnsafe(page_id_t page_id, frame_id_t frame_id) -> bool;
   auto FlushPageUnsafe(page_id_t page_id, frame_id_t frame_id) -> bool;

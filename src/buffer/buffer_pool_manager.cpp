@@ -631,4 +631,51 @@ auto BufferPoolManager::GetPinCount(page_id_t page_id) -> std::optional<size_t> 
   }
 }
 
+/**
+ * @brief 对一个已在 memory 中的 page 增加 pin 计数.
+ *
+ * Hint 函数, 效果不定.
+ * 必须要在持有 page 的 lock 时调用.
+ *
+ * @param page_id 已在 memory 中的某个 page 的 id.
+ * @return bool 若成功则返回 true, 若不在 memory 中则返回 false.
+ */
+auto BufferPoolManager::PinPage(page_id_t page_id) -> bool {
+  {
+    std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
+    frame_id_t frame_id{FindFrameUnsafe(page_id)};
+    if (frame_id == INVALID_FRAME_ID) {
+      return false;
+    }
+    FrameHeader &frame{*frames_[frame_id]};
+    if (frame.pin_count_++ == 0) {
+      replacer_->SetEvictable(frame_id, false);
+    }
+  }
+  return true;
+}
+/**
+ * @brief 对一个已在 memory 中的 page 减少 pin 计数.
+ *
+ * Hint 函数, 效果不定.
+ * 必须要在持有 page 的 lock 时调用.
+ *
+ * @param page_id 已在 memory 中的某个 page 的 id.
+ * @return bool 若成功则返回 true, 若不在 memory 中则返回 false.
+ */
+auto BufferPoolManager::UnpinPage(page_id_t page_id) -> bool {
+  {
+    std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
+    frame_id_t frame_id{FindFrameUnsafe(page_id)};
+    if (frame_id == INVALID_FRAME_ID) {
+      return false;
+    }
+    FrameHeader &frame{*frames_[frame_id]};
+    if (frame.pin_count_-- == 1) {
+      replacer_->SetEvictable(frame_id, true);
+    }
+  }
+  return true;
+}
+
 }  // namespace bustub
