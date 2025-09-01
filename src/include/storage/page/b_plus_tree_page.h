@@ -27,7 +27,7 @@ namespace bustub {
 #define INDEX_TEMPLATE_ARGUMENTS template <typename KeyType, typename ValueType, typename KeyComparator>
 
 // define page type enum
-enum class IndexPageType { INVALID_INDEX_PAGE = 0, LEAF_PAGE, INTERNAL_PAGE };
+enum class IndexPageType : std::uint32_t { INVALID_INDEX_PAGE = 0, LEAF_PAGE, INTERNAL_PAGE };  // NOLINT
 
 /**
  * Both internal and leaf page are inherited from this page.
@@ -39,6 +39,13 @@ enum class IndexPageType { INVALID_INDEX_PAGE = 0, LEAF_PAGE, INTERNAL_PAGE };
  * ---------------------------------------------------------
  * | PageType (4) | CurrentSize (4) | MaxSize (4) |  ...   |
  * ---------------------------------------------------------
+ *
+ * 此实现中, 所有的 size 语义都是指 key 的数量.
+ * 所有 internal page 的 key[0] 都是无效, 相当于从 1 开始.
+ * 所有 leaf page 的 val[0] 有效.
+ *
+ * 关于对 BPlusTreePage 的操作, 都必须基于 page id,
+ * 从 bpm 获得 PageGuard, 并 `reinterpret_cast` 为 BPlusTreePage 来操作.
  */
 class BPlusTreePage {
  public:
@@ -63,11 +70,17 @@ class BPlusTreePage {
    */
  private:
   // Member variables, attributes that both internal and leaf page share
-  IndexPageType page_type_ __attribute__((__unused__));
-  // Number of key & value pairs in a page
-  int size_ __attribute__((__unused__));
-  // Max number of key & value pairs in a page
-  int max_size_ __attribute__((__unused__));
+  IndexPageType page_type_;
+  /**
+   * Number of key & value pairs in a page
+   * 无论什么类型节点, 都指示当前已有的 key 数量.
+   */
+  int size_;
+  /**
+   * Max number of key & value pairs in a page
+   * 无论什么类型节点, 都指示最大的 key 数量.
+   */
+  int max_size_;
 };
 
 }  // namespace bustub

@@ -88,8 +88,15 @@ class BPlusTreeLeafPage : public BPlusTreePage {
   }
 
  private:
+  /**
+   * Sibling leaf page id, 用于 BPlusTree 顺序查找.
+   */
   page_id_t next_page_id_;
-  // Array members for page data.
+  /**
+   * Array members for page data.
+   * 此处数组大小基于 1 Page 大小计算.
+   * 其算法减去了 `next_page_id_` 所占大小.
+   */
   KeyType key_array_[LEAF_PAGE_SLOT_CNT];
   ValueType rid_array_[LEAF_PAGE_SLOT_CNT];
   // (Spring 2025) Feel free to add more fields and helper functions below if needed

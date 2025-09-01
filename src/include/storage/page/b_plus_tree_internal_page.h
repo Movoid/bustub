@@ -50,6 +50,9 @@ class BPlusTreeInternalPage : public BPlusTreePage {
   BPlusTreeInternalPage() = delete;
   BPlusTreeInternalPage(const BPlusTreeInternalPage &other) = delete;
 
+  /**
+   * 此处 `max_size` 是 val 个数.
+   */
   void Init(int max_size = INTERNAL_PAGE_SLOT_CNT);
 
   auto KeyAt(int index) const -> KeyType;
@@ -91,7 +94,10 @@ class BPlusTreeInternalPage : public BPlusTreePage {
   }
 
  private:
-  // Array members for page data.
+  /**
+   * Array members for page data.
+   * 此处数组大小基于 1 Page 大小计算.
+   */
   KeyType key_array_[INTERNAL_PAGE_SLOT_CNT];
   ValueType page_id_array_[INTERNAL_PAGE_SLOT_CNT];
   // (Spring 2025) Feel free to add more fields and helper functions below if needed

@@ -18,28 +18,57 @@ namespace bustub {
  * Helper methods to get/set page type
  * Page type enum class is defined in b_plus_tree_page.h
  */
-auto BPlusTreePage::IsLeafPage() const -> bool { UNIMPLEMENTED("TODO(P2): Add implementation."); }
-void BPlusTreePage::SetPageType(IndexPageType page_type) { UNIMPLEMENTED("TODO(P2): Add implementation."); }
+auto BPlusTreePage::IsLeafPage() const -> bool { return page_type_ == IndexPageType::LEAF_PAGE; }
+void BPlusTreePage::SetPageType(IndexPageType page_type) { page_type_ = page_type; }
 
 /*
  * Helper methods to get/set size (number of key/value pairs stored in that
  * page)
  */
-auto BPlusTreePage::GetSize() const -> int { UNIMPLEMENTED("TODO(P2): Add implementation."); }
-void BPlusTreePage::SetSize(int size) { UNIMPLEMENTED("TODO(P2): Add implementation."); }
-void BPlusTreePage::ChangeSizeBy(int amount) { UNIMPLEMENTED("TODO(P2): Add implementation."); }
+auto BPlusTreePage::GetSize() const -> int { return size_; }
+void BPlusTreePage::SetSize(int size) { size_ = size; }
+void BPlusTreePage::ChangeSizeBy(int amount) { size_ += amount; }
 
 /*
  * Helper methods to get/set max size (capacity) of the page
  */
-auto BPlusTreePage::GetMaxSize() const -> int { UNIMPLEMENTED("TODO(P2): Add implementation."); }
-void BPlusTreePage::SetMaxSize(int size) { UNIMPLEMENTED("TODO(P2): Add implementation."); }
+auto BPlusTreePage::GetMaxSize() const -> int { return max_size_; }
+void BPlusTreePage::SetMaxSize(int size) { max_size_ = size; }
 
 /*
  * Helper method to get min page size
  * Generally, min page size == max page size / 2
  * But whether you will take ceil() or floor() depends on your implementation
+ *
+ * B+ 索引节点合并, 合并时新增来自 parent 的分隔 kv, 节点数量最多:
+ * MIN + MIN+1 + 1 <= MAX
+ * MIN <= (MAX - 2) / 2.
+ *
+ * B+ 叶子节点合并,
+ * MIN + MIN+1 <= MAX
+ * MIN <= (MAX - 1) / 2.
+ *
+ * B+ 索引节点分裂, 失去一个分隔 kv 移动到 parent 节点.
+ * ceil((MAX-1) / 2) >= MIN
+ * MIN <= MAX / 2.
+ *
+ * B+ 叶子节点分裂, 分裂不丢失分隔 kv, 节点数量最多:
+ * ceil(MAX / 2) >= MIN
+ * MIN <= (MAX + 1) / 2.
+ *
+ * 优先尝试均分, 若失败,
+ * 在插入且 >= MAX 时分裂, 删除且 <= MIN 时合并.
  */
-auto BPlusTreePage::GetMinSize() const -> int { UNIMPLEMENTED("TODO(P2): Add implementation."); }
+auto BPlusTreePage::GetMinSize() const -> int {
+  // BUSTUB_ASSERT((max_size_ - 2) / 2 > 0, "BPlusTreePage:GetMinSize: `max_size_` is too small.");
+  BUSTUB_ASSERT(page_type_ != IndexPageType::INVALID_INDEX_PAGE, "BPlusTreePage::GetMinSize: Invalid page type.");
+  int ret{};
+  if (page_type_ == IndexPageType::INTERNAL_PAGE) {  // Internal
+    ret = (max_size_ - 2) / 2;
+  } else if (page_type_ == IndexPageType::LEAF_PAGE) {  // Leaf
+    ret = (max_size_ - 1) / 2;
+  }
+  return ret;
+}
 
 }  // namespace bustub
