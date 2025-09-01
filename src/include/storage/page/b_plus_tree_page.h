@@ -81,6 +81,13 @@ class BPlusTreePage {
    * 无论什么类型节点, 都指示最大的 key 数量.
    */
   int max_size_;
+
+  /**
+   * 每个 Page 的读写锁.
+   */
+  std::shared_mutex rwlatch_;
 };
+
+#define GENERAL_PAGE_HEADER_SIZE sizeof(BPlusTreePage)
 
 }  // namespace bustub
