@@ -143,6 +143,14 @@ class BufferPoolManager {
                     LogManager *log_manager = nullptr);
   ~BufferPoolManager();
 
+  /**
+   * A custom deleter.
+   */
+  struct PageDeleter {
+    BufferPoolManager *bpm_;
+    void operator()(page_id_t page_id) { bpm_->DeletePage(page_id); }
+  };
+
   auto Size() const -> size_t;
   auto NewPage() -> page_id_t;
   auto DeletePage(page_id_t page_id) -> bool;
