@@ -73,6 +73,7 @@ INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool {
   UNIMPLEMENTED("TODO(P2): Add implementation.");
   // Declaration of context instance. Using the Context is not necessary but advised.
+
   Context ctx;
 }
 
