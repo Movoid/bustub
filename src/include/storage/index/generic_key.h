@@ -71,7 +71,10 @@ class GenericKey {
 };
 
 /**
- * Function object returns true if lhs < rhs, used for trees
+ * 注意此处的三路比较.
+ * lhs <  rhs : return -1.  ( < 0)
+ * lhs >  rhs : return  1.  ( > 0)
+ * lhs == rhs : return  0.  (== 0)
  */
 template <size_t KeySize>
 class GenericComparator {

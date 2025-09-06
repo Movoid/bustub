@@ -21,7 +21,7 @@
 namespace bustub {
 
 #define B_PLUS_TREE_LEAF_PAGE_TYPE BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>
-#define LEAF_PAGE_HEADER_SIZE 4
+#define LEAF_PAGE_HEADER_SIZE (sizeof(page_id_t) + sizeof(bool) + sizeof(KeyType))
 #define LEAF_PAGE_SLOT_CNT \
   ((BUSTUB_PAGE_SIZE - GENERAL_PAGE_HEADER_SIZE - LEAF_PAGE_HEADER_SIZE) / (sizeof(KeyType) + sizeof(ValueType)))
 
@@ -56,6 +56,9 @@ class BPlusTreeLeafPage : public BPlusTreePage {
   BPlusTreeLeafPage() = delete;
   BPlusTreeLeafPage(const BPlusTreeLeafPage &other) = delete;
 
+  /**
+   * 直接调用此函数初始化, 其中封装了对 BPlusTreePage 的初始化.
+   */
   void Init(int max_size = LEAF_PAGE_SLOT_CNT);
 
   // Helper methods
@@ -93,6 +96,18 @@ class BPlusTreeLeafPage : public BPlusTreePage {
    * Sibling leaf page id, 用于 BPlusTree 顺序查找.
    */
   page_id_t next_page_id_;
+
+  /**
+   * 基于 B Link Tree,
+   * 需要维护一个 `high_key_` 指明当前 Node 覆盖范围的 upper bound.
+   * 分裂时, 其更新为分隔 key 的值,
+   * 合并时, 合并后节点更新为较大值.
+   *
+   * 必须先检查 `high_is_inf_`.
+   */
+  bool high_is_inf_;
+  KeyType high_key_;
+
   /**
    * Array members for page data.
    * 此处数组大小基于 1 Page 大小计算.

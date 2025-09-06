@@ -433,6 +433,9 @@ struct PrintableBPlusTree;
  *
  * Hint: This class is designed to help you keep track of the pages
  * that you're modifying or accessing.
+ *
+ * 此 class 应该是在遍历时存储 PageGuard,
+ * 便于调试时观察. 可选用.
  */
 class Context {
  public:
@@ -461,6 +464,20 @@ class BPlusTree {
   using LeafPage = BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>;
 
  public:
+  /**
+   * BPlusTree 构造函数.
+   * 其中 `leaf_max_size` 和 `internal_max_size` 直接用于空间分配大小.
+   * `BPlusTreeInternalPage` 中第一个 `key` 是 invalid 的, 仍算入 `size` 中.
+   *
+   * 并发控制, 采用 B Link Tree 方案.
+   *
+   * 索引节点唯一的增加方法, 只发生在 root 分裂时,
+   * 即使两种节点的 `max_size` 不同, 也可以支持.
+   *
+   * Split, 只允许节点向右 Split.
+   * Merge, 只允许节点向右 Merge.
+   * > 尽管可以实现向左 Merge, 但向右 Merge 更符合 Sibling Link 的语义.
+   */
   explicit BPlusTree(std::string name, page_id_t header_page_id, BufferPoolManager *buffer_pool_manager,
                      const KeyComparator &comparator, int leaf_max_size = LEAF_PAGE_SLOT_CNT,
                      int internal_max_size = INTERNAL_PAGE_SLOT_CNT);

@@ -14,7 +14,12 @@
 #include "storage/index/b_plus_tree_debug.h"
 
 namespace bustub {
-
+/**
+ * 构造函数
+ * 此处应该 **提前构造 root 节点** 更加方便.
+ * 若 root 为空, 当作叶子节点进行操作.
+ * root 节点只能在析构时被释放.
+ */
 INDEX_TEMPLATE_ARGUMENTS
 BPLUSTREE_TYPE::BPlusTree(std::string name, page_id_t header_page_id, BufferPoolManager *buffer_pool_manager,
                           const KeyComparator &comparator, int leaf_max_size, int internal_max_size)
@@ -24,17 +29,52 @@ BPLUSTREE_TYPE::BPlusTree(std::string name, page_id_t header_page_id, BufferPool
       leaf_max_size_(leaf_max_size),
       internal_max_size_(internal_max_size),
       header_page_id_(header_page_id) {
-  WritePageGuard guard = bpm_->WritePage(header_page_id_);
-  auto root_page = guard.AsMut<BPlusTreeHeaderPage>();
-  root_page->root_page_id_ = INVALID_PAGE_ID;
+  // LC: Lock parent.
+  auto header_page_g{bpm_->WritePage(header_page_id_)};
+  auto header_data{header_page_g.AsMut<BPlusTreeHeaderPage>()};
+  header_data->root_page_id_ = bpm_->NewPage();
+  // LC: Lock child.
+  auto root_page_g{bpm_->WritePage(header_data->root_page_id_)};
+  // LC: Unlock parent.
+  header_page_g.Drop();
+
+  root_page_g.AsMut<LeafPage>()->Init();
+
+  // LC: Unlock child.
+  root_page_g.Drop();
 }
 
 /**
  * @brief Helper function to decide whether current b+tree is empty
  * @return Returns true if this B+ tree has no keys and values.
+ *
+ * 先必须检查 page id 是否合法.
  */
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::IsEmpty() const -> bool { UNIMPLEMENTED("TODO(P2): Add implementation."); }
+auto BPLUSTREE_TYPE::IsEmpty() const -> bool {
+  if (header_page_id_ == INVALID_PAGE_ID) {
+    return true;
+  }
+  // LC: Lock parent.
+  auto header_page_g{bpm_->ReadPage(header_page_id_)};
+  auto header_data{header_page_g.As<BPlusTreeHeaderPage>()};
+  if (header_data->root_page_id_ == INVALID_PAGE_ID) {
+    return true;
+  }
+  // LC: Lock child.
+  auto root_page_g{bpm_->ReadPage(header_data->root_page_id_)};
+  // LC: Unlock parent.
+  header_page_g.Drop();
+
+  if (root_page_g.As<BPlusTreePage>()->IsLeafPage()) {
+    return root_page_g.As<LeafPage>()->GetSize() == 0;
+  }
+  // Root is InternalPage so the tree cannot be empty.
+  BUSTUB_ASSERT(root_page_g.As<InternalPage>()->GetSize() > 0, "Broken root.");
+  return false;
+  // LC: Unlock child.
+  // root_page_g.Drop();
+}
 
 /*****************************************************************************
  * SEARCH
@@ -132,7 +172,13 @@ auto BPLUSTREE_TYPE::End() -> INDEXITERATOR_TYPE { UNIMPLEMENTED("TODO(P2): Add 
  * You may want to implement this while implementing Task #3.
  */
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::GetRootPageId() -> page_id_t { UNIMPLEMENTED("TODO(P2): Add implementation."); }
+auto BPLUSTREE_TYPE::GetRootPageId() -> page_id_t {
+  if (header_page_id_ == INVALID_PAGE_ID) {
+    return INVALID_PAGE_ID;
+  }
+  auto root_data{bpm_->ReadPage(header_page_id_).As<BPlusTreeHeaderPage>()};
+  return root_data->root_page_id_;
+}
 
 template class BPlusTree<GenericKey<4>, RID, GenericComparator<4>>;
 

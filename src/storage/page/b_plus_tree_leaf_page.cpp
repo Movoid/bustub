@@ -34,6 +34,7 @@ namespace bustub {
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_LEAF_PAGE_TYPE::Init(int max_size) {
   // UNIMPLEMENTED("TODO(P2): Add implementation.");
+  BUSTUB_ASSERT(max_size > 0 && static_cast<std::uint64_t>(max_size) <= LEAF_PAGE_SLOT_CNT, "Invalid init.");
   SetSize(0);
   SetMaxSize(max_size);
   SetPageType(IndexPageType::LEAF_PAGE);
@@ -46,12 +47,14 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::Init(int max_size) {
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_LEAF_PAGE_TYPE::GetNextPageId() const -> page_id_t {
   // UNIMPLEMENTED("TODO(P2): Add implementation.");
+  BUSTUB_ASSERT(next_page_id_ > 0, "Memory corrupted?");
   return next_page_id_;
 }
 
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_LEAF_PAGE_TYPE::SetNextPageId(page_id_t next_page_id) {
   // UNIMPLEMENTED("TODO(P2): Add implementation.");
+  BUSTUB_ASSERT(next_page_id_ > 0, "Memory corrupted?");
   next_page_id_ = next_page_id;
 }
 
@@ -62,6 +65,7 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::SetNextPageId(page_id_t next_page_id) {
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_LEAF_PAGE_TYPE::KeyAt(int index) const -> KeyType {
   // UNIMPLEMENTED("TODO(P2): Add implementation.");
+  BUSTUB_ASSERT(0 <= index && static_cast<std::uint64_t>(index) < LEAF_PAGE_SLOT_CNT, "Invalid index.");
   return key_array_[index];
 }
 

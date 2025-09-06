@@ -41,16 +41,12 @@ void BPlusTreePage::SetMaxSize(int size) { max_size_ = size; }
  * But whether you will take ceil() or floor() depends on your implementation
  *
  * B+ 索引节点合并, 合并时新增来自 parent 的分隔 kv, 节点数量最多:
- * MIN + MIN+1 + 1 <= MAX
- * MIN <= (MAX - 2) / 2.
  *
  * B+ 叶子节点合并,
  * MIN + MIN+1 <= MAX
  * MIN <= (MAX - 1) / 2.
  *
  * B+ 索引节点分裂, 失去一个分隔 kv 移动到 parent 节点.
- * ceil((MAX-1) / 2) >= MIN
- * MIN <= MAX / 2.
  *
  * B+ 叶子节点分裂, 分裂不丢失分隔 kv, 节点数量最多:
  * ceil(MAX / 2) >= MIN
@@ -60,15 +56,51 @@ void BPlusTreePage::SetMaxSize(int size) { max_size_ = size; }
  * 在插入且 >= MAX 时分裂, 删除且 <= MIN 时合并.
  */
 auto BPlusTreePage::GetMinSize() const -> int {
-  // BUSTUB_ASSERT((max_size_ - 2) / 2 > 0, "BPlusTreePage:GetMinSize: `max_size_` is too small.");
-  BUSTUB_ASSERT(page_type_ != IndexPageType::INVALID_INDEX_PAGE, "BPlusTreePage::GetMinSize: Invalid page type.");
+  BUSTUB_ASSERT(page_type_ != IndexPageType::INVALID_INDEX_PAGE, "Invalid page type.");
   int ret{};
-  if (page_type_ == IndexPageType::INTERNAL_PAGE) {  // Internal
-    ret = (max_size_ - 2) / 2;
-  } else if (page_type_ == IndexPageType::LEAF_PAGE) {  // Leaf
-    ret = (max_size_ - 1) / 2;
-  }
+  // if (page_type_ == IndexPageType::INTERNAL_PAGE) {  // Internal
+  //   ret = (max_size_ - 2) / 2;
+  // } else if (page_type_ == IndexPageType::LEAF_PAGE) {  // Leaf
+  //   ret = (max_size_ - 1) / 2;
+  // }
+  return (max_size_ - 1) / 2;
+  BUSTUB_ASSERT(ret > 0, "`max_size_` is too small.");
   return ret;
 }
+
+/**
+关于 min_size_ 的计算草稿.
+
+索引节点:
+
+对于 key,
+
+SLOT_CNT_MAX = max_size_.
+SLOT_CNT_MIN = 1.
+
+INVALID = 1.
+
+VALID_MAX = max_size_ - 1.
+
+
+合并:
+
+VALID_MIN + VALID_MIN+1 + 1 <= VALID_MAX.
+2*VALID_MIN + 2 <= max_size_ - 1.
+2*VALID_MIN <= max_size_ - 3.
+VALID_MIN <= (max_size_ - 3) / 2.
+
+VALID_MIN + 1 <= (max_size_ - 1) / 2.
+
+
+分裂:
+
+ceil( (VALID_MAX-1) / 2 ) >= VALID_MIN.
+(VALID_MAX - 1 + 1) / 2 >= VALID_MIN.
+VALID_MIN <= VALID_MAX / 2.
+VALID_MIN <= (max_size_ - 1) / 2.
+
+VALID_MIN + 1 <= (max_size_ + 1) / 2.
+*/
 
 }  // namespace bustub
