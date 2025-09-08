@@ -35,6 +35,24 @@ void BPlusTreePage::ChangeSizeBy(int amount) { size_ += amount; }
 auto BPlusTreePage::GetMaxSize() const -> int { return max_size_; }
 void BPlusTreePage::SetMaxSize(int size) { max_size_ = size; }
 
+auto BPlusTreePage::IsOverflowed() const -> bool { return GetSize() >= GetMaxSize(); }
+
+/** 无法通过均分解决 Overflow. */
+auto BPlusTreePage::IsOverflowedWith(ReadPageGuard &rpage_g) const -> bool {
+  int cnt_sum{GetSize() + rpage_g.As<BPlusTreePage>()->GetSize()};
+  /** Ceil. */
+  return (cnt_sum + 1) / 2 >= GetMaxSize();
+}
+
+auto BPlusTreePage::IsUnderflowed() const -> bool { return GetSize() <= GetMinSize(); }
+
+/** 无法通过均分解决 Underflow. */
+auto BPlusTreePage::IsUnderflowedWith(ReadPageGuard &rpage_g) const -> bool {
+  int cnt_sum{GetSize() + rpage_g.As<BPlusTreePage>()->GetSize()};
+  /** Floor. */
+  return (cnt_sum / 2) <= GetMinSize();
+}
+
 /*
  * Helper method to get min page size
  * Generally, min page size == max page size / 2

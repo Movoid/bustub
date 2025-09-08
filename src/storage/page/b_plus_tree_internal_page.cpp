@@ -32,7 +32,6 @@ namespace bustub {
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
-  // UNIMPLEMENTED("TODO(P2): Add implementation.");
   BUSTUB_ASSERT(max_size > 0 && static_cast<std::uint64_t>(max_size) <= INTERNAL_PAGE_SLOT_CNT, "Invalid init.");
   SetSize(0);
   SetMaxSize(max_size);
@@ -48,8 +47,6 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::KeyAt(int index) const -> KeyType {
-  // UNIMPLEMENTED("TODO(P2): Add implementation.");
-  // BUSTUB_ASSERT(0 < index && index < INTERNAL_PAGE_SLOT_CNT, "Invalid index.");
   BUSTUB_ASSERT(0 <= index && static_cast<std::uint64_t>(index) < INTERNAL_PAGE_SLOT_CNT, "Invalid index.");
   return key_array_[index];
 }
@@ -62,7 +59,6 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::KeyAt(int index) const -> KeyType {
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetKeyAt(int index, const KeyType &key) {
-  // UNIMPLEMENTED("TODO(P2): Add implementation.");
   BUSTUB_ASSERT(0 <= index && static_cast<std::uint64_t>(index) < INTERNAL_PAGE_SLOT_CNT, "Invalid index.");
   key_array_[index] = key;
 }
@@ -76,25 +72,12 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetKeyAt(int index, const KeyType &key) {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::ValueAt(int index) const -> ValueType {
-  // UNIMPLEMENTED("TODO(P2): Add implementation.");
   BUSTUB_ASSERT(0 <= index && static_cast<std::uint64_t>(index) < INTERNAL_PAGE_SLOT_CNT, "Invalid index.");
   return page_id_array_[index];
 }
 
-// INDEX_TEMPLATE_ARGUMENTS
-// auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetValidKeyCnt() const -> int {
-//   BUSTUB_ASSERT(GetSize() > 0, "Memory corrupted?");
-//   return GetSize() - 1;
-// }
-
-// INDEX_TEMPLATE_ARGUMENTS
-// auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetMaxValidKeyCnt() const -> int { return GetMaxSize() - 1; }
-
-// INDEX_TEMPLATE_ARGUMENTS
-// auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetMinValidKeyCnt() const -> int { return GetMinSize() - 1; }
-
 INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::HasHighKey() const -> bool { return high_key_is_valid_; }
+auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::HasValidHighKey() const -> bool { return high_key_is_valid_; }
 
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetHighKey() const -> const KeyType & {
@@ -103,34 +86,12 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetHighKey() const -> const KeyType & {
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::IsOverflowed() const -> bool { return GetSize() >= GetMaxSize(); }
-
-/** 无法通过均分解决 Overflow. */
-INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::IsOverflowedWith(ReadPageGuard &rpage_g) const -> bool {
-  int cnt_sum{GetSize() + rpage_g.As<BPlusTreeInternalPage>()->GetSize()};
-  /** Ceil. */
-  return (cnt_sum + 1) / 2 >= GetMaxSize();
-}
-
-INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::IsUnderflowed() const -> bool { return GetSize() <= GetMinSize(); }
-
-/** 无法通过均分解决 Underflow. */
-INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::IsUnderflowedWith(ReadPageGuard &rpage_g) const -> bool {
-  int cnt_sum{GetSize() + rpage_g.As<BPlusTreeInternalPage>()->GetSize()};
-  /** Floor. */
-  return (cnt_sum / 2) <= GetMinSize();
+auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool {
+  return !high_key_is_valid_ || cmp(key, high_key_) <= 0;
 }
 
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndexUpperbound(const KeyType &key, KeyComparator &cmp) const -> int {
-  /** 先检查 high_key. */
-  if (high_key_is_valid_ && cmp(key, high_key_) >= 0) {
-    return GetSize();  // end();
-  }
-
   int l{0};          // [0, l) -> x <= key.
   int r{GetSize()};  // [r, GetSize()) -> x > key.
   while (r - l > 0) {
@@ -145,12 +106,23 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndexUpperbound(const KeyType &key, Key
 }
 
 INDEX_TEMPLATE_ARGUMENTS
+auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndexLowerbound(const KeyType &key, KeyComparator &cmp) const -> int {
+  int l{0};          // [0, l) -> x < key.
+  int r{GetSize()};  // [r, GetSize()) -> x >= key.
+  while (r - l > 0) {
+    int mid{l + ((r - l) / 2)};
+    if (cmp(key_array_[mid], key) < 0) {
+      l = mid + 1;
+    } else {
+      r = mid;
+    }
+  }
+  return r;
+}
+
+INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndex(const KeyType &key, const ValueType &val, KeyComparator &cmp) const
     -> int {
-  if (high_key_is_valid_ && cmp(key, high_key_) >= 0) {
-    return GetSize();
-  }
-
   int upperbound_idx{FindIndexUpperbound(key, cmp)};
   for (int i = upperbound_idx - 1; i > 0; i--) {
     if (cmp(key, key_array_[i]) != 0) {
@@ -186,6 +158,38 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::DeleteKeyAt(int index) {
   int mv_cnt{GetSize() - begin};
   std::memmove(key_array_ + to, key_array_ + begin, sizeof(KeyType) * mv_cnt);
   std::memmove(page_id_array_ + to, page_id_array_ + begin, sizeof(ValueType) * mv_cnt);
+}
+
+INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage_g, int l_size, int r_size) {
+  int l_diff_cnt{l_size - GetSize()};
+  int r_diff_cnt{r_size - rpage_g.As<BPlusTreeInternalPage>()->GetSize()};
+
+  BUSTUB_ASSERT(l_diff_cnt + r_diff_cnt == 0, "Invalid args.");
+
+  auto rpage{rpage_g.AsMut<BPlusTreeInternalPage>()};
+
+  if (l_diff_cnt > 0) {
+    // l need `+l_diff_cnt` kv pairs.
+    std::memmove(key_array_ + GetSize(), rpage->key_array_, sizeof(KeyType) * l_diff_cnt);
+    std::memmove(page_id_array_ + GetSize(), rpage->page_id_array_, sizeof(ValueType) * l_diff_cnt);
+    std::memmove(rpage->key_array_, rpage->key_array_ + l_diff_cnt, sizeof(KeyType) * (rpage->GetSize() - l_diff_cnt));
+    std::memmove(rpage->page_id_array_, rpage->page_id_array_ + l_diff_cnt,
+                 sizeof(ValueType) * (rpage->GetSize() - l_diff_cnt));
+
+  } else if (r_diff_cnt > 0) {
+    // r need `+r_diff_cnt` kv pairs.
+    std::memmove(rpage->key_array_ + r_diff_cnt, rpage->key_array_, sizeof(KeyType) * rpage->GetSize());
+    std::memmove(rpage->page_id_array_ + r_diff_cnt, rpage->page_id_array_, sizeof(ValueType) * rpage->GetSize());
+    std::memmove(rpage->key_array_, key_array_ + GetSize() - r_diff_cnt, sizeof(KeyType) * r_diff_cnt);
+    std::memmove(rpage->page_id_array_, page_id_array_ + GetSize() - r_diff_cnt, sizeof(ValueType) * r_diff_cnt);
+  }
+
+  // Update `high_key`.
+  high_key_ = r_size == 0 ? rpage->GetHighKey() : rpage->KeyAt(0);
+
+  SetSize(l_size);
+  rpage->SetSize(r_size);
 }
 
 // valuetype for internalNode should be page id_t

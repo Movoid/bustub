@@ -94,23 +94,32 @@ class BPlusTreeLeafPage : public BPlusTreePage {
   /**
    * Custom helpers.
    */
-  auto HasHighKey() const -> bool;
+  auto HasValidHighKey() const -> bool;
   auto GetHighKey() const -> const KeyType &;
-  void SetHighKey(const KeyType &high_key);
 
-  auto IsOverflowed() const -> bool;
-  auto IsOverflowedWith(ReadPageGuard &rpage_g) -> bool;
-  auto IsUnderflowed() const -> bool;
-  auto IsUnderflowedWith(ReadPageGuard &rpage_g) -> bool;
+  /**
+   * 和 InternalNode 不同,
+   * LeafNode 的 `high_key_` 是 exclusive upperbound.
+   */
+  auto CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool;
 
-  auto FindIndexUpperbound(const KeyType &key) const -> int;
-  auto FindIndex(const KeyType &key, const ValueType &val) const -> int;
+  /**
+   * 找 upper bound.
+   * 在需要新增 KV Pair 的时候寻找 Slot.
+   *
+   * 如果任何区间都不匹配 `key`,
+   * 如, `key >= this->high_key_`,
+   * 则返回 -1.
+   */
+  auto FindIndexUpperbound(const KeyType &key, KeyComparator &cmp) const -> int;
+
+  auto FindIndexLowerbound(const KeyType &key, KeyComparator &cmp) const -> int;
 
   void NewKeyAt(int index);
   void ModifyKeyAt(int index, const KeyType &key, const ValueType &val);
   void DeleteKeyAt(int index);
 
-  auto RedistributeWithRight(WritePageGuard &rpage_g, int l_size, int r_size) -> KeyType;
+  void RedistributeWithRight(WritePageGuard &rpage_g, int l_size, int r_size);
 
   /**
    * 传统 B Plus Tree 在 LeafNode key[0] 修改时需要修改 parent InternalNode 对应 key,
@@ -118,7 +127,7 @@ class BPlusTreeLeafPage : public BPlusTreePage {
    */
  private:
   /**
-   * Sibling leaf page id, 用于 BPlusTree 顺序查找.
+   * Sibling leaf page id.
    */
   page_id_t next_page_id_;
 
@@ -136,7 +145,6 @@ class BPlusTreeLeafPage : public BPlusTreePage {
   /**
    * Array members for page data.
    * 此处数组大小基于 1 Page 大小计算.
-   * 其算法减去了 `next_page_id_` 所占大小.
    */
   KeyType key_array_[LEAF_PAGE_SLOT_CNT];
   ValueType rid_array_[LEAF_PAGE_SLOT_CNT];

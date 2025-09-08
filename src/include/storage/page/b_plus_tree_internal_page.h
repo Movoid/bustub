@@ -108,24 +108,10 @@ class BPlusTreeInternalPage : public BPlusTreePage {
   /**
    * Custom helpers.
    */
-  auto HasHighKey() const -> bool;
+  auto HasValidHighKey() const -> bool;
   auto GetHighKey() const -> const KeyType &;
-  void SetHighKey(const KeyType &high_key);
 
-  /**
-   * 只有在 `Is{Over, Under}flowedWith` 返回 `false` 时,
-   * 才应该采取 Split/Merge.
-   */
-  auto IsOverflowed() const -> bool;
-
-  /** 无法通过均分解决 Overflow. */
-  auto IsOverflowedWith(ReadPageGuard &rpage_g) const -> bool;
-
-  auto IsUnderflowed() const -> bool;
-
-  /** 无法通过均分解决 Underflow. */
-  auto IsUnderflowedWith(ReadPageGuard &rpage_g) const -> bool;
-
+  auto CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool;
   /**
    * 找 upper bound.
    * 在需要新增 KV Pair 的时候寻找 Slot.
@@ -135,6 +121,8 @@ class BPlusTreeInternalPage : public BPlusTreePage {
    * 则返回 -1.
    */
   auto FindIndexUpperbound(const KeyType &key, KeyComparator &cmp) const -> int;
+
+  auto FindIndexLowerbound(const KeyType &key, KeyComparator &cmp) const -> int;
 
   /**
    * 找明确 KV Pair.
@@ -146,7 +134,7 @@ class BPlusTreeInternalPage : public BPlusTreePage {
   void ModifyKeyAt(int index, const KeyType &key, const ValueType &val);
   void DeleteKeyAt(int index);
 
-  auto RedistributeWithRight(WritePageGuard &rpage_g, int l_size, int r_size) -> KeyType;
+  void RedistributeWithRight(WritePageGuard &rpage_g, int l_size, int r_size);
 
  private:
   /**
@@ -162,6 +150,8 @@ class BPlusTreeInternalPage : public BPlusTreePage {
    * 合并时, 合并后节点更新为较大值.
    *
    * 必须先检查 `high_key_is_valid_`.
+   * 只有最右侧节点 `high_key_is_valid_ == false`.
+   * 空节点的 `high_key_` 仍有效.
    */
   bool high_key_is_valid_;
   KeyType high_key_;

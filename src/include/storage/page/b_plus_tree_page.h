@@ -68,6 +68,20 @@ class BPlusTreePage {
   void SetMaxSize(int max_size);
   auto GetMinSize() const -> int;
 
+  /**
+   * 只有在 `Is{Over, Under}flowedWith` 返回 `false` 时,
+   * 才应该采取 Split/Merge.
+   */
+  auto IsOverflowed() const -> bool;
+
+  /** 无法通过均分解决 Overflow. */
+  auto IsOverflowedWith(ReadPageGuard &rpage_g) const -> bool;
+
+  auto IsUnderflowed() const -> bool;
+
+  /** 无法通过均分解决 Underflow. */
+  auto IsUnderflowedWith(ReadPageGuard &rpage_g) const -> bool;
+
   /*
    * TODO(P2): Remove __attribute__((__unused__)) if you intend to use the fields.
    */
