@@ -490,6 +490,10 @@ class Context {
  * 应在持有 Header + Root Latch 时将 Root page id 修改为此 Child,
  * 此过程不需要锁 Child.
  *
+ * 关于对 parent 的查找和插入 key:
+ * 插入 key, 如果当前 Node covered, 则可以插入.
+ * 遍历时查找, 优先找 lowerbound 的 kv pair.
+ *
  * 如果 Root Overflowed, 无论节点类型,
  * 应在持有 Header + Root Latch 时修改 Root page id 为新的 Root.
  */
