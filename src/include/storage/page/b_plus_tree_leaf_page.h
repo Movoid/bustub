@@ -91,6 +91,31 @@ class BPlusTreeLeafPage : public BPlusTreePage {
     return kstr;
   }
 
+  /**
+   * Custom helpers.
+   */
+  auto HasHighKey() const -> bool;
+  auto GetHighKey() const -> const KeyType &;
+  void SetHighKey(const KeyType &high_key);
+
+  auto IsOverflowed() const -> bool;
+  auto IsOverflowedWith(ReadPageGuard &rpage_g) -> bool;
+  auto IsUnderflowed() const -> bool;
+  auto IsUnderflowedWith(ReadPageGuard &rpage_g) -> bool;
+
+  auto FindIndexUpperbound(const KeyType &key) const -> int;
+  auto FindIndex(const KeyType &key, const ValueType &val) const -> int;
+
+  void NewKeyAt(int index);
+  void ModifyKeyAt(int index, const ValueType &val);
+  void DeleteKeyAt(int index);
+
+  auto RedistributeWithRight(WritePageGuard &rpage_g, int l_size, int r_size) -> KeyType;
+
+  /**
+   * 传统 B Plus Tree 在 LeafNode key[0] 修改时需要修改 parent InternalNode 对应 key,
+   * 但此实现不会这么做.
+   */
  private:
   /**
    * Sibling leaf page id, 用于 BPlusTree 顺序查找.
@@ -103,9 +128,9 @@ class BPlusTreeLeafPage : public BPlusTreePage {
    * 分裂时, 其更新为分隔 key 的值,
    * 合并时, 合并后节点更新为较大值.
    *
-   * 必须先检查 `high_is_inf_`.
+   * 必须先检查 `high_key_is_valid_`.
    */
-  bool high_is_inf_;
+  bool high_key_is_valid_;
   KeyType high_key_;
 
   /**

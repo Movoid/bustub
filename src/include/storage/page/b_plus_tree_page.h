@@ -41,8 +41,8 @@ enum class IndexPageType : std::uint32_t { INVALID_INDEX_PAGE = 0, LEAF_PAGE, IN
  * ---------------------------------------------------------
  *
  * 此实现中, 所有的 size 语义都是指 key 的数量.
- * 所有 internal page 的 key[0] 都是无效, 相当于从 1 开始.
- * 无效的 key **也参与计数** .
+ * 所有 internal page 的 key[0] 都是无效,
+ * 然而, 无效的 key **也参与 size 计数** .
  * 所有 leaf page 的 val[0] 有效.
  *
  * 关于对 BPlusTreePage 的操作, 都必须基于 page id,

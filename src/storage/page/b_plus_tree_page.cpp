@@ -58,11 +58,6 @@ void BPlusTreePage::SetMaxSize(int size) { max_size_ = size; }
 auto BPlusTreePage::GetMinSize() const -> int {
   BUSTUB_ASSERT(page_type_ != IndexPageType::INVALID_INDEX_PAGE, "Invalid page type.");
   int ret{};
-  // if (page_type_ == IndexPageType::INTERNAL_PAGE) {  // Internal
-  //   ret = (max_size_ - 2) / 2;
-  // } else if (page_type_ == IndexPageType::LEAF_PAGE) {  // Leaf
-  //   ret = (max_size_ - 1) / 2;
-  // }
   return (max_size_ - 1) / 2;
   BUSTUB_ASSERT(ret > 0, "`max_size_` is too small.");
   return ret;

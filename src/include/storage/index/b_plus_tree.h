@@ -457,9 +457,48 @@ class Context {
 
 #define BPLUSTREE_TYPE BPlusTree<KeyType, ValueType, KeyComparator>
 
-// Main class providing the API for the Interactive B+ Tree.
+/**
+ * 并发控制, 采用 B Link Tree 方案.
+ *
+ * 树高只在 Root Split/Merge 时变化.
+ *
+ * Split, 节点向右 Split 出新节点.
+ * Merge, 节点向右寻找节点进行 Merge.
+ * > Tree 最右侧可能出现空节点, 是合法状态.
+ * > Merge 后变空的节点作为 Forwarding Node 存在, 指向被 Merge 到的节点.
+ * > 所有节点的 `key[0]` 被修改后, 都 **不应该** 修改父节点.
+ *
+ * 当 Root 只有两个 Child 且可合并, 则需要将这两个 Child Merge 为新的 Root,
+ * Root 的类型取决于这两个 Child 的类型.
+ *
+ * B Link Tree 中,
+ * Split 和 Merge 操作, 无论是 Internal 还是 Leaf,
+ * 都需要更新 Sibling Link.
+ *
+ *
+ * Split 细节:
+ * node1 向右创建新节点 node2, 将 node1 后半部分移动到 node2.
+ * 下阶段将 node2 对应 key 插入 parent.
+ *
+ * Merge 细节:
+ * node1 通过 Sibling Link 找到 node2, 若不存在则结束操作.
+ * 将 node2 合并入 node1 后半部分.
+ * 下阶段在 parent 删除 node2 对应 key.
+ *
+ * 对 Root 的操作细节:
+ * 如果 Root 为 InternalNode, 且 `GetSize()` 返回 `1` 则说明 Root 只有一个 Child Node.
+ * 应在持有 Header + Root Latch 时将 Root page id 修改为此 Child,
+ * 此过程不需要锁 Child.
+ *
+ * 如果 Root Overflowed, 无论节点类型,
+ * 应在持有 Header + Root Latch 时修改 Root page id 为新的 Root.
+ */
 INDEX_TEMPLATE_ARGUMENTS
 class BPlusTree {
+  /**
+   * 注意此处, InternalPage 存储 <KeyType, page_id_t> pair,
+   * 其 page_id_t 用于指引遍历.
+   */
   using InternalPage = BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>;
   using LeafPage = BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>;
 
@@ -468,15 +507,6 @@ class BPlusTree {
    * BPlusTree 构造函数.
    * 其中 `leaf_max_size` 和 `internal_max_size` 直接用于空间分配大小.
    * `BPlusTreeInternalPage` 中第一个 `key` 是 invalid 的, 仍算入 `size` 中.
-   *
-   * 并发控制, 采用 B Link Tree 方案.
-   *
-   * 索引节点唯一的增加方法, 只发生在 root 分裂时,
-   * 即使两种节点的 `max_size` 不同, 也可以支持.
-   *
-   * Split, 只允许节点向右 Split.
-   * Merge, 只允许节点向右 Merge.
-   * > 尽管可以实现向左 Merge, 但向右 Merge 更符合 Sibling Link 的语义.
    */
   explicit BPlusTree(std::string name, page_id_t header_page_id, BufferPoolManager *buffer_pool_manager,
                      const KeyComparator &comparator, int leaf_max_size = LEAF_PAGE_SLOT_CNT,

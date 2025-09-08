@@ -94,6 +94,52 @@ class BPlusTreeInternalPage : public BPlusTreePage {
     return kstr;
   }
 
+  /**
+   * Custom helpers.
+   */
+
+  /**
+   * `key[0]` 是 Invalid,
+   * 不算入 ValidKeyCnt.
+   */
+  auto GetValidKeyCnt() -> int;
+  auto GetMaxValidKeyCnt() -> int;
+
+  auto HasHighKey() const -> bool;
+  auto GetHighKey() const -> const KeyType &;
+  void SetHighKey(const KeyType &high_key);
+
+  /**
+   * 只有在 `Is{Over, Under}flowedWith` 返回 `false` 时,
+   * 才应该采取 Split/Merge.
+   */
+  auto IsOverflowed() const -> bool;
+  auto IsOverflowedWith(ReadPageGuard &rpage_g) -> bool;
+  auto IsUnderflowed() const -> bool;
+  auto IsUnderflowedWith(ReadPageGuard &rpage_g) -> bool;
+
+  /**
+   * 找 upper bound.
+   * 在需要新增 KV Pair 的时候寻找 Slot.
+   *
+   * 如果任何区间都不匹配 `key`,
+   * 如, `key >= this->high_key_`,
+   * 则返回 -1.
+   */
+  auto FindIndexUpperbound(const KeyType &key) const -> int;
+
+  /**
+   * 找明确 KV Pair.
+   * 在需要删除明确的 KV Pair 时用于检查 Slot.
+   */
+  auto FindIndex(const KeyType &key, const ValueType &val) const -> int;
+
+  void NewKeyAt(int index);
+  void ModifyKeyAt(int index, const ValueType &val);
+  void DeleteKeyAt(int index);
+
+  auto RedistributeWithRight(WritePageGuard &rpage_g, int l_size, int r_size) -> KeyType;
+
  private:
   /**
    * Sibling internal page id,
@@ -107,9 +153,9 @@ class BPlusTreeInternalPage : public BPlusTreePage {
    * 分裂时, 其更新为分隔 key 的值,
    * 合并时, 合并后节点更新为较大值.
    *
-   * 必须先检查 `high_is_inf_`.
+   * 必须先检查 `high_key_is_valid_`.
    */
-  bool high_is_inf_;
+  bool high_key_is_valid_;
   KeyType high_key_;
 
   /**
