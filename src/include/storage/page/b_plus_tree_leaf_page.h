@@ -107,7 +107,7 @@ class BPlusTreeLeafPage : public BPlusTreePage {
   auto FindIndex(const KeyType &key, const ValueType &val) const -> int;
 
   void NewKeyAt(int index);
-  void ModifyKeyAt(int index, const ValueType &val);
+  void ModifyKeyAt(int index, const KeyType &key, const ValueType &val);
   void DeleteKeyAt(int index);
 
   auto RedistributeWithRight(WritePageGuard &rpage_g, int l_size, int r_size) -> KeyType;

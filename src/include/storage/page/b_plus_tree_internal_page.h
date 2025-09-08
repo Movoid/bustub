@@ -43,6 +43,17 @@ namespace bustub {
  *  ---------------------------------------------
  * | PAGE_ID(1) | PAGE_ID(2) | ... | PAGE_ID(n) |
  *  ---------------------------------------------
+ *
+ * 在当前的 B Link Tree 设计中,
+ * KEY(1) 是有意义的, 指示当前节点的 Key lowerbound.
+ * 这个 key 应该和 parent 中对应此节点的 key 相等.
+ *
+ * 在这种设计下, InternalPage 每个 key 和 val 完美成对.
+ * 其中 val[i] 指向 key in [ key[i], key[i+1] ) 的区间,
+ * 其中 key[n] 即为 Sibling Link.
+ *
+ * 在 Split/Merge 中, 此 key 参与移动,
+ * 使得操作和结构更加优雅, 也修复了 Split/Merge 不知道 parent 中操作哪个 key 的问题.
  */
 INDEX_TEMPLATE_ARGUMENTS
 class BPlusTreeInternalPage : public BPlusTreePage {
@@ -97,14 +108,6 @@ class BPlusTreeInternalPage : public BPlusTreePage {
   /**
    * Custom helpers.
    */
-
-  /**
-   * `key[0]` 是 Invalid,
-   * 不算入 ValidKeyCnt.
-   */
-  auto GetValidKeyCnt() -> int;
-  auto GetMaxValidKeyCnt() -> int;
-
   auto HasHighKey() const -> bool;
   auto GetHighKey() const -> const KeyType &;
   void SetHighKey(const KeyType &high_key);
@@ -114,9 +117,14 @@ class BPlusTreeInternalPage : public BPlusTreePage {
    * 才应该采取 Split/Merge.
    */
   auto IsOverflowed() const -> bool;
-  auto IsOverflowedWith(ReadPageGuard &rpage_g) -> bool;
+
+  /** 无法通过均分解决 Overflow. */
+  auto IsOverflowedWith(ReadPageGuard &rpage_g) const -> bool;
+
   auto IsUnderflowed() const -> bool;
-  auto IsUnderflowedWith(ReadPageGuard &rpage_g) -> bool;
+
+  /** 无法通过均分解决 Underflow. */
+  auto IsUnderflowedWith(ReadPageGuard &rpage_g) const -> bool;
 
   /**
    * 找 upper bound.
@@ -126,16 +134,16 @@ class BPlusTreeInternalPage : public BPlusTreePage {
    * 如, `key >= this->high_key_`,
    * 则返回 -1.
    */
-  auto FindIndexUpperbound(const KeyType &key) const -> int;
+  auto FindIndexUpperbound(const KeyType &key, KeyComparator &cmp) const -> int;
 
   /**
    * 找明确 KV Pair.
    * 在需要删除明确的 KV Pair 时用于检查 Slot.
    */
-  auto FindIndex(const KeyType &key, const ValueType &val) const -> int;
+  auto FindIndex(const KeyType &key, const ValueType &val, KeyComparator &cmp) const -> int;
 
   void NewKeyAt(int index);
-  void ModifyKeyAt(int index, const ValueType &val);
+  void ModifyKeyAt(int index, const KeyType &key, const ValueType &val);
   void DeleteKeyAt(int index);
 
   auto RedistributeWithRight(WritePageGuard &rpage_g, int l_size, int r_size) -> KeyType;
