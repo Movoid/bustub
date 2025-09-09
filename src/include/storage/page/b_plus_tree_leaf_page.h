@@ -96,6 +96,7 @@ class BPlusTreeLeafPage : public BPlusTreePage {
    */
   auto HasValidHighKey() const -> bool;
   auto GetHighKey() const -> const KeyType &;
+  void SetHighKey(const KeyType &key);
 
   /**
    * 和 InternalNode 不同,

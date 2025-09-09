@@ -38,6 +38,18 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
   SetPageType(IndexPageType::INTERNAL_PAGE);
 }
 
+INDEX_TEMPLATE_ARGUMENTS
+auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetNextPageId() const -> page_id_t {
+  BUSTUB_ASSERT(next_page_id_ > 0, "Memory corrupted?");
+  return next_page_id_;
+}
+
+INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetNextPageId(page_id_t next_page_id) {
+  BUSTUB_ASSERT(next_page_id_ > 0, "Memory corrupted?");
+  next_page_id_ = next_page_id;
+}
+
 /**
  * @brief Helper method to get/set the key associated with input "index"(a.k.a
  * array offset).
@@ -85,9 +97,12 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetHighKey() const -> const KeyType & {
   return high_key_;
 }
 
+/**
+ * InternalNode 的 `high_key_` 是 inclusive upperbound.
+ */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool {
-  return !high_key_is_valid_ || cmp(key, high_key_) <= 0;
+  return !high_key_is_valid_ || (GetSize() > 0 && cmp(key, high_key_) <= 0);
 }
 
 INDEX_TEMPLATE_ARGUMENTS

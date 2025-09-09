@@ -67,6 +67,9 @@ class BPlusTreeInternalPage : public BPlusTreePage {
    */
   void Init(int max_size = INTERNAL_PAGE_SLOT_CNT);
 
+  // Helper methods
+  auto GetNextPageId() const -> page_id_t;
+  void SetNextPageId(page_id_t next_page_id);
   auto KeyAt(int index) const -> KeyType;
 
   void SetKeyAt(int index, const KeyType &key);

@@ -485,6 +485,12 @@ class Context {
  * 将 node2 合并入 node1 后半部分.
  * 下阶段在 parent 删除 node2 对应 key.
  *
+ * > 教科书 B Plus Tree 会采用节点均分方法平衡节点,
+ * > 此处 B Link Tree 实现无此流程.
+ * > 这会导致在将右侧节点 kv pairs 移动到左侧节点时,
+ * > 正在沿着 Sibling Link 从左向右遍历的线程,
+ * > 在没有锁的时候, 错失对这些移动 kv pairs 的访问.
+ *
  * 对 Root 的操作细节:
  * 如果 Root 为 InternalNode, 且 `GetSize()` 返回 `1` 则说明 Root 只有一个 Child Node.
  * 应在持有 Header + Root Latch 时将 Root page id 修改为此 Child,
@@ -551,6 +557,13 @@ class BPlusTree {
   void RemoveFromFile(const std::filesystem::path &file_name);
 
   void BatchOpsFromFile(const std::filesystem::path &file_name);
+
+ private:
+  // auto GoByLink(const KeyType &key, ReadPageGuard &&page_g) -> ReadPageGuard;
+  // auto GoByLink(const KeyType &key, WritePageGuard &&page_g) -> WritePageGuard;
+
+  auto GoByLinkUntilCoverWithRead(const KeyType &key, ReadPageGuard &&page_g) -> ReadPageGuard;
+  auto GoByLinkUntilCoverWithWrite(const KeyType &key, ReadPageGuard &&page_g) -> WritePageGuard;
 
  private:
   void ToGraph(page_id_t page_id, const BPlusTreePage *page, std::ofstream &out);

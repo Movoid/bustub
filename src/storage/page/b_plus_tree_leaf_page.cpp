@@ -74,13 +74,16 @@ auto B_PLUS_TREE_LEAF_PAGE_TYPE::GetHighKey() const -> const KeyType & {
   return high_key_;
 }
 
+INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_LEAF_PAGE_TYPE::SetHighKey(const KeyType &key) { high_key_ = key; }
+
 /**
  * 和 InternalNode 不同,
  * LeafNode 的 `high_key_` 是 exclusive upperbound.
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_LEAF_PAGE_TYPE::CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool {
-  return !high_key_is_valid_ || cmp(key, high_key_) <= 0;
+  return !high_key_is_valid_ || (GetSize() > 0 && cmp(key, high_key_) < 0);
 }
 
 INDEX_TEMPLATE_ARGUMENTS
@@ -143,6 +146,7 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage_g, 
   int r_diff_cnt{r_size - rpage_g.As<BPlusTreeLeafPage>()->GetSize()};
 
   BUSTUB_ASSERT(l_diff_cnt + r_diff_cnt == 0, "Invalid args.");
+  BUSTUB_ASSERT(l_size > 0, "This operation is denied.");
 
   auto rpage{rpage_g.AsMut<BPlusTreeLeafPage>()};
 
@@ -163,7 +167,15 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage_g, 
   }
 
   // Update `high_key`.
-  high_key_ = r_size == 0 ? rpage->GetHighKey() : rpage->KeyAt(0);
+  // high_key_ = r_size == 0 ? rpage->GetHighKey() : rpage->KeyAt(0);
+  if (r_size == 0) {
+    rpage->SetHighKey(key_array_[0]);
+    if (rpage->HasValidHighKey()) {
+      high_key_ = rpage->GetHighKey();
+    } else {
+      high_key_is_valid_ = false;
+    }
+  }
 
   SetSize(l_size);
   rpage->SetSize(r_size);

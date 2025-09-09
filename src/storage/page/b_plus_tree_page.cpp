@@ -76,7 +76,8 @@ auto BPlusTreePage::IsUnderflowedWith(ReadPageGuard &rpage_g) const -> bool {
 auto BPlusTreePage::GetMinSize() const -> int {
   BUSTUB_ASSERT(page_type_ != IndexPageType::INVALID_INDEX_PAGE, "Invalid page type.");
   int ret{(max_size_ - 1) / 2};
-  BUSTUB_ASSERT(ret > 0, "`max_size_` is too small.");
+  /** Maybe 0 is legal. */
+  BUSTUB_ASSERT(ret >= 0, "`max_size_` is too small.");
   return ret;
 }
 
