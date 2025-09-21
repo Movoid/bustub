@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "storage/index/b_plus_tree.h"
+#include <memory_resource>
 #include "storage/index/b_plus_tree_debug.h"
 
 namespace bustub {
@@ -108,7 +109,7 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
       if (lowerbound_idx == page_data->GetSize() || comparator_(page_data->KeyAt(lowerbound_idx), key) != 0) {
         is_found = false;
       }
-      result->emplace_back(page_data->KeyAt(lowerbound_idx));
+      result->emplace_back(page_data->ValAt(lowerbound_idx));
       is_found = true;
       break;
     }
@@ -144,20 +145,22 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
   // Check root
   // auto header_g{bpm_->ReadPage(header_page_id_).As<BPlusTreeHeaderPage>()};
   auto header_g{bpm_->ReadPage(header_page_id_)};
-  int root_page_id{header_g.As<BPlusTreeHeaderPage>()->root_page_id_};
+  // int root_page_id{header_g.As<BPlusTreeHeaderPage>()->root_page_id_};
   header_g.Drop();
 
-  qsbr_mgr_.EnterCriticalZone();
-  int cur_page_id{root_page_id};
-  while (true) {
-    auto page_g{bpm_->ReadPage(cur_page_id)};
-    page_g = GoByLinkUntilCoverWithRead(key, std::move(page_g));
+  // qsbr_mgr_.EnterCriticalZone();
+  // int cur_page_id{root_page_id};
+  // while (true) {
+  //   auto page_g{bpm_->ReadPage(cur_page_id)};
+  //   page_g = GoByLinkUntilCoverWithRead(key, std::move(page_g));
+  //   int cur_pos{static_cast<int>(path.size())};
 
-    if (page_g.As<BPlusTreePage>()->IsLeafPage()) {  // leaf
+  //   if (page_g.As<BPlusTreePage>()->IsLeafPage()) {  // leaf
 
-    } else {  // internal
-    }
-  }
+  //   } else {  // internal
+  //   }
+  // }
+  return {};
 }
 
 /*****************************************************************************

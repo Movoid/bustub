@@ -60,9 +60,15 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::SetNextPageId(page_id_t next_page_id) {
  * array offset)
  */
 INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_LEAF_PAGE_TYPE::KeyAt(int index) const -> KeyType {
+auto B_PLUS_TREE_LEAF_PAGE_TYPE::KeyAt(int index) const -> const KeyType & {
   BUSTUB_ASSERT(0 <= index && static_cast<std::uint64_t>(index) < LEAF_PAGE_SLOT_CNT, "Invalid index.");
   return key_array_[index];
+}
+
+INDEX_TEMPLATE_ARGUMENTS
+auto B_PLUS_TREE_LEAF_PAGE_TYPE::ValAt(int index) const -> const ValueType & {
+  BUSTUB_ASSERT(0 <= index && static_cast<std::uint64_t>(index) < LEAF_PAGE_SLOT_CNT, "Invalid index.");
+  return rid_array_[index];
 }
 
 INDEX_TEMPLATE_ARGUMENTS
