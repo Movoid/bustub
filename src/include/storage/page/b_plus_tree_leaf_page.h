@@ -65,8 +65,9 @@ class BPlusTreeLeafPage : public BPlusTreePage {
   auto GetNextPageId() const -> page_id_t;
   void SetNextPageId(page_id_t next_page_id);
   auto KeyAt(int index) const -> const KeyType &;
+  void SetKeyAt(int index, const KeyType &key);
 
-  auto ValAt(int index) const -> const ValueType &;
+  auto ValueAt(int index) const -> const ValueType &;
 
   /**
    * @brief For test only return a string representing all keys in
@@ -97,6 +98,7 @@ class BPlusTreeLeafPage : public BPlusTreePage {
    * Custom helpers.
    */
   auto HasValidHighKey() const -> bool;
+  void SetHasValidHighKey(bool);
   auto GetHighKey() const -> const KeyType &;
   void SetHighKey(const KeyType &key);
 

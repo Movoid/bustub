@@ -71,7 +71,6 @@ class BPlusTreeInternalPage : public BPlusTreePage {
   auto GetNextPageId() const -> page_id_t;
   void SetNextPageId(page_id_t next_page_id);
   auto KeyAt(int index) const -> KeyType;
-
   void SetKeyAt(int index, const KeyType &key);
 
   /**
@@ -80,7 +79,7 @@ class BPlusTreeInternalPage : public BPlusTreePage {
    */
   auto ValueIndex(const ValueType &value) const -> int;
 
-  auto ValueAt(int index) const -> ValueType;
+  auto ValueAt(int index) const -> const ValueType &;
 
   /**
    * @brief For test only, return a string representing all keys in
@@ -112,7 +111,9 @@ class BPlusTreeInternalPage : public BPlusTreePage {
    * Custom helpers.
    */
   auto HasValidHighKey() const -> bool;
+  void SetHasValidHighKey(bool);
   auto GetHighKey() const -> const KeyType &;
+  void SetHighKey(const KeyType &);
 
   auto CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool;
   /**

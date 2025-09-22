@@ -38,6 +38,8 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::Init(int max_size) {
   SetMaxSize(max_size);
   SetPageType(IndexPageType::LEAF_PAGE);
   next_page_id_ = INVALID_PAGE_ID;
+  high_key_is_valid_ = false;
+  SetHighKey(KeyType{});
 }
 
 /**
@@ -66,13 +68,22 @@ auto B_PLUS_TREE_LEAF_PAGE_TYPE::KeyAt(int index) const -> const KeyType & {
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_LEAF_PAGE_TYPE::ValAt(int index) const -> const ValueType & {
+void B_PLUS_TREE_LEAF_PAGE_TYPE::SetKeyAt(int index, const KeyType &key) {
+  BUSTUB_ASSERT(0 <= index && static_cast<std::uint64_t>(index) < LEAF_PAGE_SLOT_CNT, "Invalid index.");
+  key_array_[index] = key;
+}
+
+INDEX_TEMPLATE_ARGUMENTS
+auto B_PLUS_TREE_LEAF_PAGE_TYPE::ValueAt(int index) const -> const ValueType & {
   BUSTUB_ASSERT(0 <= index && static_cast<std::uint64_t>(index) < LEAF_PAGE_SLOT_CNT, "Invalid index.");
   return rid_array_[index];
 }
 
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_LEAF_PAGE_TYPE::HasValidHighKey() const -> bool { return high_key_is_valid_; }
+
+INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_LEAF_PAGE_TYPE::SetHasValidHighKey(bool is_valid) { high_key_is_valid_ = is_valid; }
 
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_LEAF_PAGE_TYPE::GetHighKey() const -> const KeyType & {
@@ -86,6 +97,7 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::SetHighKey(const KeyType &key) { high_key_ = ke
 /**
  * 和 InternalNode 不同,
  * LeafNode 的 `high_key_` 是 exclusive upperbound.
+ * 即, 当前 Node 不包括 `high_key_`.
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_LEAF_PAGE_TYPE::CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool {
@@ -172,19 +184,37 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage_g, 
     std::memmove(rpage->rid_array_, rid_array_ + GetSize() - r_diff_cnt, sizeof(ValueType) * r_diff_cnt);
   }
 
-  // Update `high_key`.
-  // high_key_ = r_size == 0 ? rpage->GetHighKey() : rpage->KeyAt(0);
-  if (r_size == 0) {
-    rpage->SetHighKey(key_array_[0]);
-    if (rpage->HasValidHighKey()) {
-      high_key_ = rpage->GetHighKey();
-    } else {
-      high_key_is_valid_ = false;
-    }
-  }
+  // // Update `high_key`.
+  // // high_key_ = r_size == 0 ? rpage->GetHighKey() : rpage->KeyAt(0);
+  // if (r_size == 0) {
+  //   // rpage 的 SibLink 指向当前 node,
+  //   // 这种设置是合理的.
+  //   rpage->SetHighKey(key_array_[0]);
+  //   if (rpage->HasValidHighKey()) {
+  //     high_key_ = rpage->GetHighKey();
+  //   } else {
+  //     high_key_is_valid_ = false;
+  //   }
+  // }
 
   SetSize(l_size);
   rpage->SetSize(r_size);
+
+  if (rpage->GetSize() == 0) {
+    if (rpage->HasValidHighKey()) {
+      SetHighKey(rpage->GetHighKey());
+      SetHasValidHighKey(true);
+    } else {
+      SetHighKey(key_array_[0]);
+      // SetHasValidHighKey(false);  // Better not to be false.
+    }
+  } else {
+    SetHighKey(rpage->key_array_[0]);
+    SetHasValidHighKey(true);
+  }
+
+  // Should **NOT** modify SibLink here.
+  // `Redistribute` **ONLY** modifies kv pairs.
 }
 
 template class BPlusTreeLeafPage<GenericKey<4>, RID, GenericComparator<4>>;

@@ -36,6 +36,9 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
   SetSize(0);
   SetMaxSize(max_size);
   SetPageType(IndexPageType::INTERNAL_PAGE);
+  next_page_id_ = INVALID_PAGE_ID;
+  high_key_is_valid_ = false;
+  SetHighKey(KeyType{});
 }
 
 INDEX_TEMPLATE_ARGUMENTS
@@ -83,7 +86,7 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetKeyAt(int index, const KeyType &key) {
  * @return Value at index
  */
 INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::ValueAt(int index) const -> ValueType {
+auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::ValueAt(int index) const -> const ValueType & {
   BUSTUB_ASSERT(0 <= index && static_cast<std::uint64_t>(index) < INTERNAL_PAGE_SLOT_CNT, "Invalid index.");
   return page_id_array_[index];
 }
@@ -92,13 +95,25 @@ INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::HasValidHighKey() const -> bool { return high_key_is_valid_; }
 
 INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetHasValidHighKey(bool is_valid) { high_key_is_valid_ = is_valid; }
+
+INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetHighKey() const -> const KeyType & {
   BUSTUB_ASSERT(high_key_is_valid_, "Memory corrupted?");
   return high_key_;
 }
 
+INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetHighKey(const KeyType &high_key) { high_key_ = high_key; }
+
 /**
  * InternalNode 的 `high_key_` 是 inclusive upperbound.
+ * 即, 当前 Node 可能包含 `high_key_`.
+ *
+ * 无论如何, 当 `high_key_` invalid 时,
+ * 必须停止.
+ * 只有最右侧的节点允许 `high_key_` invalid,
+ * 被 Merge 操作清空的节点不允许设置 invalid.
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool {
@@ -205,6 +220,8 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage
 
   SetSize(l_size);
   rpage->SetSize(r_size);
+  // 这里没有设置 Sibling.
+  // 谁负责设置? todo.
 }
 
 // valuetype for internalNode should be page id_t

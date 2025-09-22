@@ -1098,6 +1098,8 @@ class Context {
  * 并发控制, 采用 B Link Tree 方案.
  *
  * 树高只在 Root Split/Merge 时变化.
+ * > 仅 Read 时, 先解锁 Header 再锁 Root.
+ * > 若要 Write Root, 先锁 Root 再锁 Header.
  *
  * Split, 节点向右 Split 出新节点.
  * Merge, 节点向右寻找节点进行 Merge.
@@ -1107,6 +1109,8 @@ class Context {
  *
  * 当 Root 只有两个 Child 且可合并, 则需要将这两个 Child Merge 为新的 Root,
  * Root 的类型取决于这两个 Child 的类型.
+ * > 最开始的 Root 永远不会被 destroy,
+ * > 其会随着树高增长, 始终为最左下的节点.
  *
  * B Link Tree 中,
  * Split 和 Merge 操作, 无论是 Internal 还是 Leaf,
@@ -1199,8 +1203,9 @@ class BPlusTree {
   // auto GoByLink(const KeyType &key, ReadPageGuard &&page_g) -> ReadPageGuard;
   // auto GoByLink(const KeyType &key, WritePageGuard &&page_g) -> WritePageGuard;
 
-  auto GoByLinkUntilCoverWithRead(const KeyType &key, ReadPageGuard &&page_g) -> ReadPageGuard;
-  auto GoByLinkUntilCoverWithWrite(const KeyType &key, ReadPageGuard &&page_g) -> WritePageGuard;
+  auto GoSibUntilCoverRR(const KeyType &key, ReadPageGuard &&page_g) -> ReadPageGuard;
+  auto GoSibUntilCoverWW(const KeyType &key, WritePageGuard &&page_g) -> WritePageGuard;
+  auto GoSibUntilCoverRW(const KeyType &key, ReadPageGuard &&page_g) -> WritePageGuard;
 
  private:
   void ToGraph(page_id_t page_id, const BPlusTreePage *page, std::ofstream &out);

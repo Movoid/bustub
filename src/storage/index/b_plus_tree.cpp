@@ -91,32 +91,32 @@ auto BPLUSTREE_TYPE::IsEmpty() const -> bool {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result) -> bool {
-  auto header_g{bpm_->ReadPage(header_page_id_)};
-  int root_page_id{header_g.As<BPlusTreeHeaderPage>()->root_page_id_};
-  header_g.Drop();
+  page_id_t cur_page_id{GetRootPageId()};
+  bool is_found{};
 
   qsbr_mgr_.EnterCriticalZone();
-  int cur_page_id{root_page_id};
-  bool is_found{};
   while (true) {
     auto page_g{bpm_->ReadPage(cur_page_id)};
-    page_g = GoByLinkUntilCoverWithRead(key, std::move(page_g));
+    page_g = GoSibUntilCoverRR(key, std::move(page_g));
 
-    if (page_g.As<BPlusTreePage>()->IsLeafPage()) {  // Leaf Page
+    if (page_g.As<BPlusTreePage>()->IsLeafPage()) {
       qsbr_mgr_.ExitCriticalZone();
+      // page_g = GoSibUntilCoverRR(key, std::move(page_g));
+      // 目标 kv 最多只会出现在一个节点, 沿着 SibLink walk 到 Covered 节点即可.
       auto page_data{page_g.As<LeafPage>()};
       int lowerbound_idx{page_data->FindIndexLowerbound(key, comparator_)};
       if (lowerbound_idx == page_data->GetSize() || comparator_(page_data->KeyAt(lowerbound_idx), key) != 0) {
         is_found = false;
+        break;
       }
-      result->emplace_back(page_data->ValAt(lowerbound_idx));
       is_found = true;
+      result->emplace_back(page_data->ValueAt(lowerbound_idx));
       break;
     }
-    // Internal Page
+    // Is internal node.
     auto page_data{page_g.As<InternalPage>()};
     int upperbound_idx{page_data->FindIndexUpperbound(key, comparator_)};
-    BUSTUB_ASSERT(upperbound_idx > 0, "All keys in this node are above `key`.");
+    BUSTUB_ASSERT(upperbound_idx > 0, "All keys in this node are above `key`? Invariant broken.");
     cur_page_id = page_data->ValueAt(upperbound_idx - 1);
   }
 
@@ -142,25 +142,51 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool {
-  // Check root
-  // auto header_g{bpm_->ReadPage(header_page_id_).As<BPlusTreeHeaderPage>()};
-  auto header_g{bpm_->ReadPage(header_page_id_)};
-  // int root_page_id{header_g.As<BPlusTreeHeaderPage>()->root_page_id_};
-  header_g.Drop();
+  page_id_t cur_page_id{GetRootPageId()};
 
-  // qsbr_mgr_.EnterCriticalZone();
-  // int cur_page_id{root_page_id};
-  // while (true) {
-  //   auto page_g{bpm_->ReadPage(cur_page_id)};
-  //   page_g = GoByLinkUntilCoverWithRead(key, std::move(page_g));
-  //   int cur_pos{static_cast<int>(path.size())};
+  meow_utils::SmallVector<page_id_t, 8> path{};
 
-  //   if (page_g.As<BPlusTreePage>()->IsLeafPage()) {  // leaf
+  qsbr_mgr_.EnterCriticalZone();
 
-  //   } else {  // internal
-  //   }
-  // }
-  return {};
+  // Phase 1.
+  while (true) {
+    ReadPageGuard page_g{bpm_->ReadPage(cur_page_id)};
+    auto page_header_data{page_g.As<BPlusTreePage>()};
+    if (page_header_data->IsLeafPage()) {
+      WritePageGuard page_g_w{GoSibUntilCoverRW(key, std::move(page_g))};
+      // Now have write access to leaf.
+      // Split leaf?
+      while (true) {
+        auto page_data{page_g_w.AsMut<LeafPage>()};
+        if (page_data->IsOverflowed()) {
+          // Split.
+          // Create a new node as new sibling.
+          page_id_t new_sib_id{bpm_->NewPage()};
+          WritePageGuard new_sib_g_w{bpm_->WritePage(new_sib_id)};
+          auto new_sib_data{new_sib_g_w.AsMut<LeafPage>()};
+          new_sib_data->Init();  // Remember to init.
+          int sum{page_data->GetSize() + new_sib_data->GetSize()};
+          page_data->RedistributeWithRight(new_sib_g_w, (sum + 1) / 2, sum / 2);
+
+          // todo
+
+        } else {
+          break;
+        }
+      }
+      path.EmplaceBack(page_g_w.GetPageId());
+      // Do some **REAL** modifications.
+    }
+    // Is internal node. Go down.
+    page_g = GoSibUntilCoverRR(key, std::move(page_g));
+    path.EmplaceBack(page_g.GetPageId());
+    auto page_data{page_g.As<InternalPage>()};
+    int upperbound_idx{page_data->FindIndexUpperbound(key, comparator_)};
+    BUSTUB_ASSERT(upperbound_idx > 0, "All keys in this node are above `key`? Invariant broken.");
+    cur_page_id = page_data->ValueAt(upperbound_idx - 1);
+  }
+
+  // Phase 2.
 }
 
 /*****************************************************************************
@@ -226,8 +252,13 @@ auto BPLUSTREE_TYPE::GetRootPageId() -> page_id_t {
   return root_data->root_page_id_;
 }
 
+/**
+ * 辅助函数.
+ * 在走到最右侧 Sibling 时必须停止,
+ * 最右侧的 Sibling 其 `high_key_` 应该表示 +inf.
+ */
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::GoByLinkUntilCoverWithRead(const KeyType &key, ReadPageGuard &&page_g) -> ReadPageGuard {
+auto BPLUSTREE_TYPE::GoSibUntilCoverRR(const KeyType &key, ReadPageGuard &&page_g) -> ReadPageGuard {
   if (page_g.As<BPlusTreePage>()->IsLeafPage()) {  // leaf
     while (!page_g.As<LeafPage>()->CoveredKey(key, comparator_)) {
       auto page_data{page_g.As<LeafPage>()};
@@ -243,7 +274,23 @@ auto BPLUSTREE_TYPE::GoByLinkUntilCoverWithRead(const KeyType &key, ReadPageGuar
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::GoByLinkUntilCoverWithWrite(const KeyType &key, ReadPageGuard &&page_g) -> WritePageGuard {
+auto BPLUSTREE_TYPE::GoSibUntilCoverWW(const KeyType &key, WritePageGuard &&page_g) -> WritePageGuard {
+  if (page_g.As<BPlusTreePage>()->IsLeafPage()) {  // leaf
+    while (!page_g.As<LeafPage>()->CoveredKey(key, comparator_)) {
+      auto page_data{page_g.As<LeafPage>()};
+      page_g = std::move(bpm_->WritePage(page_data->GetNextPageId()));
+    }
+  } else {  // internal
+    while (!page_g.As<InternalPage>()->CoveredKey(key, comparator_)) {
+      auto page_data{page_g.As<InternalPage>()};
+      page_g = std::move(bpm_->WritePage(page_data->GetNextPageId()));
+    }
+  }
+  return page_g;
+}
+
+INDEX_TEMPLATE_ARGUMENTS
+auto BPLUSTREE_TYPE::GoSibUntilCoverRW(const KeyType &key, ReadPageGuard &&page_g) -> WritePageGuard {
   if (page_g.As<BPlusTreePage>()->IsLeafPage()) {  // leaf
     while (!page_g.As<LeafPage>()->CoveredKey(key, comparator_)) {
       auto page_data{page_g.As<LeafPage>()};
