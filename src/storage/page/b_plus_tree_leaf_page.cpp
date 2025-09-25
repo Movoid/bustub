@@ -80,7 +80,11 @@ auto B_PLUS_TREE_LEAF_PAGE_TYPE::ValueAt(int index) const -> const ValueType & {
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_LEAF_PAGE_TYPE::HasValidHighKey() const -> bool { return high_key_is_valid_; }
+auto B_PLUS_TREE_LEAF_PAGE_TYPE::HasValidHighKey() const -> bool {
+  BUSTUB_ASSERT(high_key_is_valid_ || (!high_key_is_valid_ && (GetSize() == 0 || GetNextPageId() == INVALID_PAGE_ID)),
+                "Invariant broken.");
+  return high_key_is_valid_;
+}
 
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_LEAF_PAGE_TYPE::SetHasValidHighKey(bool is_valid) { high_key_is_valid_ = is_valid; }
@@ -135,29 +139,46 @@ auto B_PLUS_TREE_LEAF_PAGE_TYPE::FindIndexLowerbound(const KeyType &key, KeyComp
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_LEAF_PAGE_TYPE::NewKeyAt(int index) {
+void B_PLUS_TREE_LEAF_PAGE_TYPE::NewKvAt(int index) {
   int begin{index};
   int to{index + 1};
   int mv_cnt{GetSize() - begin};
+  BUSTUB_ASSERT(mv_cnt >= 0, "Invalid args.");
+  /**
+   * NOTICE: `index` cannot be `0`. This would break invariants.
+   */
+  BUSTUB_ASSERT(0 < index && index <= GetSize(), "Invalid args.");
   std::memmove(key_array_ + to, key_array_ + begin, sizeof(KeyType) * mv_cnt);
   std::memmove(rid_array_ + to, rid_array_ + begin, sizeof(ValueType) * mv_cnt);
+  SetSize(GetSize() + 1);
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_LEAF_PAGE_TYPE::ModifyKeyAt(int index, const KeyType &key, const ValueType &val) {
+void B_PLUS_TREE_LEAF_PAGE_TYPE::ModifyKvAt(int index, const KeyType &key, const ValueType &val) {
+  BUSTUB_ASSERT(0 <= index && index < GetSize(), "Invalid args.");
   key_array_[index] = key;
   rid_array_[index] = val;
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_LEAF_PAGE_TYPE::DeleteKeyAt(int index) {
+void B_PLUS_TREE_LEAF_PAGE_TYPE::DeleteKvAt(int index) {
   int begin{index + 1};
   int to{index};
   int mv_cnt{GetSize() - begin};
+  BUSTUB_ASSERT(mv_cnt >= 0, "Invalid args.");
+  BUSTUB_ASSERT(0 <= index && index < GetSize(), "Invalid args.");
   std::memmove(key_array_ + to, key_array_ + begin, sizeof(KeyType) * mv_cnt);
   std::memmove(rid_array_ + to, rid_array_ + begin, sizeof(ValueType) * mv_cnt);
+  SetSize(GetSize() - 1);
 }
 
+/**
+ * WARNING: 此函数不修改 SibLink.
+ *
+ * 此函数需要优化. Todo.
+ * 实际只会有两种操作, Split 和 Merge.
+ * 不存在均分操作.
+ */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_LEAF_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage_g, int l_size, int r_size) {
   int l_diff_cnt{l_size - GetSize()};
@@ -184,19 +205,6 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage_g, 
     std::memmove(rpage->rid_array_, rid_array_ + GetSize() - r_diff_cnt, sizeof(ValueType) * r_diff_cnt);
   }
 
-  // // Update `high_key`.
-  // // high_key_ = r_size == 0 ? rpage->GetHighKey() : rpage->KeyAt(0);
-  // if (r_size == 0) {
-  //   // rpage 的 SibLink 指向当前 node,
-  //   // 这种设置是合理的.
-  //   rpage->SetHighKey(key_array_[0]);
-  //   if (rpage->HasValidHighKey()) {
-  //     high_key_ = rpage->GetHighKey();
-  //   } else {
-  //     high_key_is_valid_ = false;
-  //   }
-  // }
-
   SetSize(l_size);
   rpage->SetSize(r_size);
 
@@ -205,11 +213,11 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage_g, 
       SetHighKey(rpage->GetHighKey());
       SetHasValidHighKey(true);
     } else {
-      SetHighKey(key_array_[0]);
-      // SetHasValidHighKey(false);  // Better not to be false.
+      SetHighKey(KeyAt(0));
+      // Better not to be false.
     }
   } else {
-    SetHighKey(rpage->key_array_[0]);
+    SetHighKey(rpage->KeyAt(0));
     SetHasValidHighKey(true);
   }
 

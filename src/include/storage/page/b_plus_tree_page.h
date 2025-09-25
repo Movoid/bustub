@@ -74,13 +74,16 @@ class BPlusTreePage {
    */
   auto IsOverflowed() const -> bool;
 
-  /** 无法通过均分解决 Overflow. */
-  auto IsOverflowedWith(ReadPageGuard &rpage_g) const -> bool;
+  /**
+   *Merge 会导致 Overflow，
+   * 则不允许 Merge.
+   */
+  auto IsOverflowedAfterMergeWith(WritePageGuard &rpage_g) const -> bool;
 
   auto IsUnderflowed() const -> bool;
 
-  /** 无法通过均分解决 Underflow. */
-  auto IsUnderflowedWith(ReadPageGuard &rpage_g) const -> bool;
+  // /** 无法通过均分解决 Underflow. */
+  // auto IsUnderflowedWith(WritePageGuard &rpage_g) const -> bool;
 
   /*
    * TODO(P2): Remove __attribute__((__unused__)) if you intend to use the fields.

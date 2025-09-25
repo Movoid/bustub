@@ -132,11 +132,11 @@ class BPlusTreeInternalPage : public BPlusTreePage {
    * 找明确 KV Pair.
    * 在需要删除明确的 KV Pair 时用于检查 Slot.
    */
-  auto FindIndex(const KeyType &key, const ValueType &val, KeyComparator &cmp) const -> int;
+  auto FindKv(const KeyType &key, const ValueType &val, KeyComparator &cmp) const -> int;
 
-  void NewKeyAt(int index);
-  void ModifyKeyAt(int index, const KeyType &key, const ValueType &val);
-  void DeleteKeyAt(int index);
+  void NewKvAt(int index);
+  void ModifyKvAt(int index, const KeyType &key, const ValueType &val);
+  void DeleteKvAt(int index);
 
   void RedistributeWithRight(WritePageGuard &rpage_g, int l_size, int r_size);
 

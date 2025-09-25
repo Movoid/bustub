@@ -92,7 +92,11 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::ValueAt(int index) const -> const ValueType
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::HasValidHighKey() const -> bool { return high_key_is_valid_; }
+auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::HasValidHighKey() const -> bool {
+  BUSTUB_ASSERT(high_key_is_valid_ || (!high_key_is_valid_ && (GetSize() == 0 || GetNextPageId() == INVALID_PAGE_ID)),
+                "Invariant broken.");
+  return high_key_is_valid_;
+}
 
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetHasValidHighKey(bool is_valid) { high_key_is_valid_ = is_valid; }
@@ -151,8 +155,7 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndexLowerbound(const KeyType &key, Key
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndex(const KeyType &key, const ValueType &val, KeyComparator &cmp) const
-    -> int {
+auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindKv(const KeyType &key, const ValueType &val, KeyComparator &cmp) const -> int {
   int upperbound_idx{FindIndexUpperbound(key, cmp)};
   for (int i = upperbound_idx - 1; i > 0; i--) {
     if (cmp(key, key_array_[i]) != 0) {
@@ -166,28 +169,37 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndex(const KeyType &key, const ValueTy
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_INTERNAL_PAGE_TYPE::NewKeyAt(int index) {
-  // todo.
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::NewKvAt(int index) {
   int begin{index};
   int to{index + 1};
   int mv_cnt{GetSize() - begin};
+  BUSTUB_ASSERT(mv_cnt >= 0, "Invalid args.");
+  /**
+   * NOTICE: `index` cannot be `0`. This would break invariants.
+   */
+  BUSTUB_ASSERT(0 < index && index <= GetSize(), "Invalid args.");
   std::memmove(key_array_ + to, key_array_ + begin, sizeof(KeyType) * mv_cnt);
   std::memmove(page_id_array_ + to, page_id_array_ + begin, sizeof(ValueType) * mv_cnt);
+  SetSize(GetSize() + 1);
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_INTERNAL_PAGE_TYPE::ModifyKeyAt(int index, const KeyType &key, const ValueType &val) {
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::ModifyKvAt(int index, const KeyType &key, const ValueType &val) {
+  BUSTUB_ASSERT(0 <= index && index < GetSize(), "Invalid args.");
   key_array_[index] = key;
   page_id_array_[index] = val;
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_INTERNAL_PAGE_TYPE::DeleteKeyAt(int index) {
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::DeleteKvAt(int index) {
   int begin{index + 1};
   int to{index};
   int mv_cnt{GetSize() - begin};
+  BUSTUB_ASSERT(mv_cnt >= 0, "Invalid args.");
+  BUSTUB_ASSERT(0 <= index && index < GetSize(), "Invalid args.");
   std::memmove(key_array_ + to, key_array_ + begin, sizeof(KeyType) * mv_cnt);
   std::memmove(page_id_array_ + to, page_id_array_ + begin, sizeof(ValueType) * mv_cnt);
+  SetSize(GetSize() - 1);
 }
 
 INDEX_TEMPLATE_ARGUMENTS

@@ -1150,7 +1150,8 @@ class BPlusTree {
    * 注意此处, InternalPage 存储 <KeyType, page_id_t> pair,
    * 其 page_id_t 用于指引遍历.
    */
-  using InternalPage = BPlusTreeInternalPage<KeyType, page_id_t, KeyComparator>;
+  using InternalPageValueType = page_id_t;
+  using InternalPage = BPlusTreeInternalPage<KeyType, InternalPageValueType, KeyComparator>;
   using LeafPage = BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>;
 
  public:
@@ -1203,9 +1204,19 @@ class BPlusTree {
   // auto GoByLink(const KeyType &key, ReadPageGuard &&page_g) -> ReadPageGuard;
   // auto GoByLink(const KeyType &key, WritePageGuard &&page_g) -> WritePageGuard;
 
+  /**
+   * Legacy API style.
+   */
   auto GoSibUntilCoverRR(const KeyType &key, ReadPageGuard &&page_g) -> ReadPageGuard;
   auto GoSibUntilCoverWW(const KeyType &key, WritePageGuard &&page_g) -> WritePageGuard;
   auto GoSibUntilCoverRW(const KeyType &key, ReadPageGuard &&page_g) -> WritePageGuard;
+
+  auto TrySplit(WritePageGuard &page_g) -> std::optional<std::pair<KeyType, page_id_t>>;
+  auto TryMerge(WritePageGuard &page_g) -> std::optional<std::pair<KeyType, page_id_t>>;
+  // auto XorKv()
+
+  auto TryDeleteWhileScan(const KeyType &key, const InternalPageValueType &val, WritePageGuard &page_g)
+      -> std::optional<std::pair<KeyType, page_id_t>>;
 
  private:
   void ToGraph(page_id_t page_id, const BPlusTreePage *page, std::ofstream &out);

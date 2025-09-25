@@ -48,6 +48,11 @@ namespace bustub {
  *  -----------------
  * | NextPageId (4) |
  *  -----------------
+ *
+ * 如果 KEY(1) 被修改, 这可能需要修改 parent 的对应 key.
+ * 要么在 node layout 中添加一个额外的不变 KEY, 并使 parent 对应 key 不变,
+ * 要么在 parent 中先删除再添加.
+ * 也许可以选择后者, 对应的算法模块正在逐渐完善, 实现并不困难.
  */
 INDEX_TEMPLATE_ARGUMENTS
 class BPlusTreeLeafPage : public BPlusTreePage {
@@ -120,9 +125,9 @@ class BPlusTreeLeafPage : public BPlusTreePage {
 
   auto FindIndexLowerbound(const KeyType &key, KeyComparator &cmp) const -> int;
 
-  void NewKeyAt(int index);
-  void ModifyKeyAt(int index, const KeyType &key, const ValueType &val);
-  void DeleteKeyAt(int index);
+  void NewKvAt(int index);
+  void ModifyKvAt(int index, const KeyType &key, const ValueType &val);
+  void DeleteKvAt(int index);
 
   void RedistributeWithRight(WritePageGuard &rpage_g, int l_size, int r_size);
 
