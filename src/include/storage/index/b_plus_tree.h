@@ -1282,3 +1282,12 @@ struct PrintableBPlusTree {
 };
 
 }  // namespace bustub
+
+/**
+  问题日志.
+  每个 Leaf/Internal Node 的 key[0] 应该记录了当前 Node 在 parent 中的 key.
+  但 Root 开始时为空. 这可能需要特殊处理.
+
+  现在缺少对 Root 的 Split/Merge 处理,
+  细节较多.
+*/

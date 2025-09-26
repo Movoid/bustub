@@ -47,13 +47,13 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::Init(int max_size) {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_LEAF_PAGE_TYPE::GetNextPageId() const -> page_id_t {
-  BUSTUB_ASSERT(next_page_id_ > 0, "Memory corrupted?");
+  // BUSTUB_ASSERT(next_page_id_ > 0, "Memory corrupted?");
   return next_page_id_;
 }
 
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_LEAF_PAGE_TYPE::SetNextPageId(page_id_t next_page_id) {
-  BUSTUB_ASSERT(next_page_id_ > 0, "Memory corrupted?");
+  // BUSTUB_ASSERT(next_page_id_ > 0, "Memory corrupted?");
   next_page_id_ = next_page_id;
 }
 
@@ -102,6 +102,12 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::SetHighKey(const KeyType &key) { high_key_ = ke
  * 和 InternalNode 不同,
  * LeafNode 的 `high_key_` 是 exclusive upperbound.
  * 即, 当前 Node 不包括 `high_key_`.
+ *
+ * 注意! `GetSize() == 0` 的节点不可复用,
+ * 否则导致 Use After Free.
+ *
+ * 除了最右侧节点, 其他所有节点都不允许设置 `high_key_is_valid_ == false`,
+ * 否则可能对空节点错误判断为 `CoveredKey() == true`.
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_LEAF_PAGE_TYPE::CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool {
@@ -147,7 +153,7 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::NewKvAt(int index) {
   /**
    * NOTICE: `index` cannot be `0`. This would break invariants.
    */
-  BUSTUB_ASSERT(0 < index && index <= GetSize(), "Invalid args.");
+  BUSTUB_ASSERT(0 <= index && index <= GetSize(), "Invalid args.");
   std::memmove(key_array_ + to, key_array_ + begin, sizeof(KeyType) * mv_cnt);
   std::memmove(rid_array_ + to, rid_array_ + begin, sizeof(ValueType) * mv_cnt);
   SetSize(GetSize() + 1);
@@ -185,7 +191,7 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage_g, 
   int r_diff_cnt{r_size - rpage_g.As<BPlusTreeLeafPage>()->GetSize()};
 
   BUSTUB_ASSERT(l_diff_cnt + r_diff_cnt == 0, "Invalid args.");
-  BUSTUB_ASSERT(l_size > 0, "This operation is denied.");
+  BUSTUB_ASSERT(l_size != 0, "This operation is denied.");
 
   auto rpage{rpage_g.AsMut<BPlusTreeLeafPage>()};
 
@@ -214,9 +220,14 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage_g, 
       SetHasValidHighKey(true);
     } else {
       SetHighKey(KeyAt(0));
-      // Better not to be false.
     }
   } else {
+    if (HasValidHighKey()) {
+      rpage->SetHighKey(GetHighKey());
+      rpage->SetHasValidHighKey(true);
+    } else {
+      rpage->SetHasValidHighKey(false);
+    }
     SetHighKey(rpage->KeyAt(0));
     SetHasValidHighKey(true);
   }

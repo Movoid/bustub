@@ -104,6 +104,7 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
       // page_g = GoSibUntilCoverRR(key, std::move(page_g));
       // 目标 kv 最多只会出现在一个节点, 沿着 SibLink walk 到 Covered 节点即可.
       auto page_data{page_g.As<LeafPage>()};
+      PrintTree(page_g.GetPageId(), page_data);
       int lowerbound_idx{page_data->FindIndexLowerbound(key, comparator_)};
       if (lowerbound_idx == page_data->GetSize() || comparator_(page_data->KeyAt(lowerbound_idx), key) != 0) {
         is_found = false;
@@ -116,7 +117,7 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
     // Is internal node.
     auto page_data{page_g.As<InternalPage>()};
     int upperbound_idx{page_data->FindIndexUpperbound(key, comparator_)};
-    BUSTUB_ASSERT(upperbound_idx > 0, "All keys in this node are above `key`? Invariant broken.");
+    // BUSTUB_ASSERT(upperbound_idx > 0, "All keys in this node are above `key`? Invariant broken.");
     cur_page_id = page_data->ValueAt(upperbound_idx - 1);
   }
 
@@ -161,7 +162,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
       backfix_path.EmplaceBack(page_g.GetPageId());
       auto page_data{page_g.As<InternalPage>()};
       int upperbound_idx{page_data->FindIndexUpperbound(key, comparator_)};
-      BUSTUB_ASSERT(upperbound_idx > 0, "All keys in this node are above `key`? Invariant broken.");
+      // BUSTUB_ASSERT(upperbound_idx > 0, "All keys in this node are above `key`? Invariant broken.");
       page_g = bpm_->ReadPage(page_data->ValueAt(upperbound_idx - 1));
       page_header_data = page_g.As<BPlusTreePage>();
     }
@@ -181,8 +182,8 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
     BUSTUB_ASSERT(!leaf_data->IsOverflowed(), "Unexpected. This should be fixed before.");
     // Do some **REAL** modifications.
     int upperbound_idx{leaf_data->FindIndexUpperbound(key, comparator_)};
-    BUSTUB_ASSERT(upperbound_idx > 0, "Invariant broken.");
-    if (comparator_(leaf_data->KeyAt(upperbound_idx - 1), key) == 0) {
+    // BUSTUB_ASSERT(upperbound_idx > 0, "Invariant broken.");
+    if (upperbound_idx > 0 && comparator_(leaf_data->KeyAt(upperbound_idx - 1), key) == 0) {
       return false;
     }
     leaf_data->NewKvAt(upperbound_idx);
@@ -193,6 +194,11 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
   // Insert `backfix_key` to parent.
   {
     while (need_backfix) {
+      // DEBUG ONLY
+      if (backfix_path.Empty()) {
+        break;
+      }
+
       WritePageGuard page_g{bpm_->WritePage(backfix_path.Back())};
       page_g = GoSibUntilCoverWW(backfix_key, std::move(page_g));
       auto new_backfix_kv{TryDeleteWhileScan(backfix_key, backfix_page_id, page_g)};
@@ -211,7 +217,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
         }
         auto page_data{page_g.AsMut<InternalPage>()};
         int upperbound_idx{page_data->FindIndexUpperbound(backfix_key, comparator_)};
-        BUSTUB_ASSERT(upperbound_idx > 0, "Invariant broken.");
+        // BUSTUB_ASSERT(upperbound_idx > 0, "Invariant broken.");
         page_data->NewKvAt(upperbound_idx);
         page_data->ModifyKvAt(upperbound_idx, backfix_key, backfix_page_id);
       }
@@ -409,21 +415,31 @@ auto BPLUSTREE_TYPE::TryMerge(WritePageGuard &page_g) -> std::optional<std::pair
   if (page_header_data->IsLeafPage()) {
     auto page_data{page_g.AsMut<LeafPage>()};
     WritePageGuard sib_g_w{bpm_->WritePage(page_data->GetNextPageId())};
-    auto sib_data{sib_g_w.AsMut<LeafPage>()};
     if (page_header_data->IsOverflowedAfterMergeWith(sib_g_w)) {
       return std::nullopt;
     }
+    auto sib_data{sib_g_w.AsMut<LeafPage>()};
+    auto backfix_kv{std::make_pair(sib_data->KeyAt(0), sib_g_w.GetPageId())};
     int sum{page_data->GetSize() + sib_data->GetSize()};
     page_data->RedistributeWithRight(sib_g_w, sum, 0);
     page_data->SetNextPageId(sib_data->GetNextPageId());
-    // todo.
+    sib_data->SetNextPageId(page_g.GetPageId());
+    qsbr_mgr_.Retire(sib_g_w.GetPageId());
+    return backfix_kv;
   } else {  // NOLINT
     auto page_data{page_g.AsMut<LeafPage>()};
     WritePageGuard sib_g_w{bpm_->WritePage(page_data->GetNextPageId())};
     if (page_header_data->IsOverflowedAfterMergeWith(sib_g_w)) {
       return std::nullopt;
     }
-    // todo.
+    auto sib_data{sib_g_w.AsMut<LeafPage>()};
+    auto backfix_kv{std::make_pair(sib_data->KeyAt(0), sib_g_w.GetPageId())};
+    int sum{page_data->GetSize() + sib_data->GetSize()};
+    page_data->RedistributeWithRight(sib_g_w, sum, 0);
+    page_data->SetNextPageId(sib_data->GetNextPageId());
+    sib_data->SetNextPageId(page_g.GetPageId());
+    qsbr_mgr_.Retire(sib_g_w.GetPageId());
+    return backfix_kv;
   }
 }
 

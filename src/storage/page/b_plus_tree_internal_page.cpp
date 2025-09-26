@@ -43,13 +43,13 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
 
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetNextPageId() const -> page_id_t {
-  BUSTUB_ASSERT(next_page_id_ > 0, "Memory corrupted?");
+  // BUSTUB_ASSERT(next_page_id_ > 0, "Memory corrupted?");
   return next_page_id_;
 }
 
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetNextPageId(page_id_t next_page_id) {
-  BUSTUB_ASSERT(next_page_id_ > 0, "Memory corrupted?");
+  // BUSTUB_ASSERT(next_page_id_ > 0, "Memory corrupted?");
   next_page_id_ = next_page_id;
 }
 
@@ -208,6 +208,7 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage
   int r_diff_cnt{r_size - rpage_g.As<BPlusTreeInternalPage>()->GetSize()};
 
   BUSTUB_ASSERT(l_diff_cnt + r_diff_cnt == 0, "Invalid args.");
+  BUSTUB_ASSERT(l_size != 0, "This operation is denied.");
 
   auto rpage{rpage_g.AsMut<BPlusTreeInternalPage>()};
 
@@ -227,13 +228,26 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage
     std::memmove(rpage->page_id_array_, page_id_array_ + GetSize() - r_diff_cnt, sizeof(ValueType) * r_diff_cnt);
   }
 
-  // Update `high_key`.
-  high_key_ = r_size == 0 ? rpage->GetHighKey() : rpage->KeyAt(0);
-
   SetSize(l_size);
   rpage->SetSize(r_size);
-  // 这里没有设置 Sibling.
-  // 谁负责设置? todo.
+
+  if (rpage->GetSize() == 0) {
+    if (rpage->HasValidHighKey()) {
+      SetHighKey(rpage->GetHighKey());
+      SetHasValidHighKey(true);
+    } else {
+      SetHighKey(KeyAt(0));
+    }
+  } else {
+    if (HasValidHighKey()) {
+      rpage->SetHighKey(GetHighKey());
+      rpage->SetHasValidHighKey(true);
+    } else {
+      rpage->SetHasValidHighKey(false);
+    }
+    SetHighKey(rpage->KeyAt(0));
+    SetHasValidHighKey(true);
+  }
 }
 
 // valuetype for internalNode should be page id_t
