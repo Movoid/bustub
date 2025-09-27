@@ -24,21 +24,61 @@ namespace bustub {
  * set your own input parameters
  */
 INDEX_TEMPLATE_ARGUMENTS
-INDEXITERATOR_TYPE::IndexIterator() = default;
-
-INDEX_TEMPLATE_ARGUMENTS
 INDEXITERATOR_TYPE::~IndexIterator() = default;  // NOLINT
 
 INDEX_TEMPLATE_ARGUMENTS
-auto INDEXITERATOR_TYPE::IsEnd() -> bool { UNIMPLEMENTED("TODO(P2): Add implementation."); }
+auto INDEXITERATOR_TYPE::IsEnd() -> bool { return !page_g_opt_.has_value(); }
 
 INDEX_TEMPLATE_ARGUMENTS
 auto INDEXITERATOR_TYPE::operator*() -> std::pair<const KeyType &, const ValueType &> {
-  UNIMPLEMENTED("TODO(P2): Add implementation.");
+  // UNIMPLEMENTED("TODO(P2): Add implementation.");
+  BUSTUB_ASSERT(!IsEnd(), "Invalid instance.");
+  auto page_data{page_g_opt_.value().As<LeafPage>()};
+  return {page_data->KeyAt(offset_), page_data->ValueAt(offset_)};
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-auto INDEXITERATOR_TYPE::operator++() -> INDEXITERATOR_TYPE & { UNIMPLEMENTED("TODO(P2): Add implementation."); }
+auto INDEXITERATOR_TYPE::operator++() -> INDEXITERATOR_TYPE & {
+  BUSTUB_ASSERT(!IsEnd(), "Invalid instance.");
+  BUSTUB_ASSERT(page_g_opt_.value().As<BPlusTreePage>()->IsLeafPage(), "Unexpected.");
+  auto page_data{page_g_opt_.value().As<LeafPage>()};
+  offset_++;
+  if (offset_ < page_data->GetSize()) {
+    return *this;
+  }
+  page_id_t sib_id{page_data->GetNextPageId()};
+  if (sib_id == INVALID_PAGE_ID) {
+    page_g_opt_ = std::nullopt;
+    offset_ = -1;
+    return *this;
+  }
+  page_g_opt_ = std::make_optional(bpm_->ReadPage(sib_id));
+  offset_ = 0;
+  return *this;
+}
+
+INDEX_TEMPLATE_ARGUMENTS
+auto INDEXITERATOR_TYPE::operator==(const IndexIterator &itr) const -> bool {
+  // return page_g_opt_ == itr.page_g_opt_
+  if (bpm_ != itr.bpm_) {
+    return false;
+  }
+  if (offset_ != itr.offset_) {
+    return false;
+  }
+  if (page_g_opt_.has_value() != itr.page_g_opt_.has_value()) {
+    return false;
+  }
+  if (page_g_opt_.has_value()) {
+    if (page_g_opt_->GetPageId() != itr.page_g_opt_->GetPageId()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+INDEX_TEMPLATE_ARGUMENTS
+auto INDEXITERATOR_TYPE::operator!=(const IndexIterator &itr) const -> bool { return !(*this == itr); }
 
 template class IndexIterator<GenericKey<4>, RID, GenericComparator<4>>;
 

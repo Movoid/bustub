@@ -1179,6 +1179,9 @@ class BPlusTree {
   // Return the page id of the root node
   auto GetRootPageId() -> page_id_t;
 
+  // Return the page id of the root node
+  auto GetFirstLeafId() -> page_id_t;
+
   // Index iterator
   auto Begin() -> INDEXITERATOR_TYPE;
 
@@ -1211,8 +1214,8 @@ class BPlusTree {
   auto GoSibUntilCoverWW(const KeyType &key, WritePageGuard &&page_g) -> WritePageGuard;
   auto GoSibUntilCoverRW(const KeyType &key, ReadPageGuard &&page_g) -> WritePageGuard;
 
-  auto TrySplit(WritePageGuard &page_g) -> std::optional<std::pair<KeyType, page_id_t>>;
-  auto TryMerge(WritePageGuard &page_g) -> std::optional<std::pair<KeyType, page_id_t>>;
+  auto TrySplit(WritePageGuard &page_g, bool is_root_hint) -> std::optional<std::pair<KeyType, page_id_t>>;
+  auto TryMerge(WritePageGuard &page_g, bool is_root_hint) -> std::optional<std::pair<KeyType, page_id_t>>;
   // auto XorKv()
 
   auto TryDeleteWhileScan(const KeyType &key, const InternalPageValueType &val, WritePageGuard &page_g)
@@ -1289,5 +1292,7 @@ struct PrintableBPlusTree {
   但 Root 开始时为空. 这可能需要特殊处理.
 
   现在缺少对 Root 的 Split/Merge 处理,
-  细节较多.
+
+  如果 Root 所在的 Layer 有多个节点，且其中非 Root 节点发生 Split/Merge,
+  这貌似 **也应该** 提升树高，且必须把原 Root id 加入到新 Root 进行索引。
 */

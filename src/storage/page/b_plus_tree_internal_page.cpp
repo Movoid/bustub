@@ -177,7 +177,7 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::NewKvAt(int index) {
   /**
    * NOTICE: `index` cannot be `0`. This would break invariants.
    */
-  BUSTUB_ASSERT(0 < index && index <= GetSize(), "Invalid args.");
+  BUSTUB_ASSERT(0 <= index && index <= GetSize(), "Invalid args.");
   std::memmove(key_array_ + to, key_array_ + begin, sizeof(KeyType) * mv_cnt);
   std::memmove(page_id_array_ + to, page_id_array_ + begin, sizeof(ValueType) * mv_cnt);
   SetSize(GetSize() + 1);

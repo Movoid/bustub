@@ -354,7 +354,6 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
   if (page_id == INVALID_PAGE_ID) {
     return std::nullopt;
   }
-
   while (true) {
     frame_id_t frame_id{INVALID_FRAME_ID};
 
@@ -493,7 +492,6 @@ auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_typ
   if (page_id == INVALID_PAGE_ID) {
     return std::nullopt;
   }
-
   while (true) {
     frame_id_t frame_id{INVALID_FRAME_ID};
 
