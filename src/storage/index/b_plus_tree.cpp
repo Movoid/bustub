@@ -211,6 +211,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
       // 检查 level.
       if (page_data->GetLevel() != next_level) {
         backfix_path.Clear();
+        // 是否需要修改 `next_level` ?
         continue;
       }
       next_level++;
@@ -384,6 +385,40 @@ auto BPLUSTREE_TYPE::GoSibUntilCoverRW(const KeyType &key, ReadPageGuard &&page_
   return page_wg;
 }
 
+/**
+ * 存在缺陷.
+ *
+ * 被 backfix 的 Level, 不需要也不应该再次 backfix,
+ * 如果没有对称的 Merge, 其 backfix kv 不会消失.
+ * 所以新的 backfix **必须** 发生在比上次 backfix 更高的 level.
+ *
+ * 以及, 每次 backfix 应该发生在对应 `backfix_page_id` 的直接 parent level.
+ * 可问题在于, 如果这个直接 parent level 已经消失了呢?
+ *
+ * 可能需要修改机制, 比如在 Page 中标记是否已经完成了 backfix insert,
+ * 或开启了 backfix erase.
+ *
+ * 对每个 node 都引入 NOT_LINKED_IN_PARENT, IS_LINKED_IN_PARENT, DONT_LINK_IN_PARENT 三种状态.
+ * 每个新的节点初始化为 NOT_LINKED,
+ * 若 Split 后因为需要 backfix insert, 则继续沿用 `backfix_path` 机制回溯.
+ * 若某时刻发生 Merge, 若 NOT_LINKED 则 DONT_LINK 并结束. 否则只能回溯.
+ * 在真正需要 insert backfix 的 Node, 再次检查, 若 DONT_LINK 则直接返回,
+ * 否则 NOT_LINKED, 需要转变为 IS_LINKED.
+ * 在真正需要 erase backfix 的 Node, 再次检查, 此时必定是 IS_LINKED, 执行删除.
+ *
+ * 若 `GetPathTo` 返回的 path level 和先前不一致,
+ * 则必须检查对应 node 是否变为了 DONT_LINK.
+ * 按照逻辑, 此时一定是 DONT_LINK.
+ *
+ * 这意味着, XorKv 机制必须被废除,
+ * 因为其不能真正解决问题.
+ *
+ * 关于状态的修改, 必须发生在 Split/Merge 发生的同时.
+ * 若 node 非 DONT_LINK, 则其没有发生 Merge, 其 parent level 存在对应 kv.
+ * 此 kv 没有被删除, 如果在 Root 中, 则阻止了树高减小.
+ * 这保证在 NOT_LINKED 时, backfix 一定能成功,
+ * 若 parent level 消失, 则当前一定是 DONT_LINK.
+ */
 INDEX_TEMPLATE_ARGUMENTS
 void BPLUSTREE_TYPE::GetPathTo(int to_level, const KeyType &key, PathContainer &path) {
   BUSTUB_ASSERT(to_level > 1, "Invalid args.");

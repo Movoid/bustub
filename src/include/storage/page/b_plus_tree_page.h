@@ -27,7 +27,20 @@ namespace bustub {
 #define INDEX_TEMPLATE_ARGUMENTS template <typename KeyType, typename ValueType, typename KeyComparator>
 
 // define page type enum
-enum class IndexPageType : std::uint32_t { INVALID_INDEX_PAGE = 0, LEAF_PAGE, INTERNAL_PAGE };  // NOLINT
+enum class IndexPageType : std::uint8_t {
+  INVALID_INDEX_PAGE = 0,
+  LEAF_PAGE,
+  INTERNAL_PAGE,
+};
+
+/**
+ * Backfix Protocol Status.
+ */
+enum class BackfixStatus : std::uint8_t {
+  NOT_LINKED_IN_PARENT,
+  IS_LINKED_IN_PARENT,
+  DONT_LINK_IN_PARENT,
+};
 
 /**
  * Both internal and leaf page are inherited from this page.
