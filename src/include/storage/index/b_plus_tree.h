@@ -1153,6 +1153,7 @@ class BPlusTree {
   using InternalPageValueType = page_id_t;
   using InternalPage = BPlusTreeInternalPage<KeyType, InternalPageValueType, KeyComparator>;
   using LeafPage = BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>;
+  using PathContainer = meow_utils::SmallVector<page_id_t, 8>;
 
  public:
   /**
@@ -1214,11 +1215,15 @@ class BPlusTree {
   auto GoSibUntilCoverWW(const KeyType &key, WritePageGuard &&page_g) -> WritePageGuard;
   auto GoSibUntilCoverRW(const KeyType &key, ReadPageGuard &&page_g) -> WritePageGuard;
 
+  void GetPathTo(int level, const KeyType &key, PathContainer &path);
+
   auto TrySplit(WritePageGuard &page_g, bool is_root_hint) -> std::optional<std::pair<KeyType, page_id_t>>;
   auto TryMerge(WritePageGuard &page_g, bool is_root_hint) -> std::optional<std::pair<KeyType, page_id_t>>;
-  // auto XorKv()
 
   auto TryDeleteWhileScan(const KeyType &key, const InternalPageValueType &val, WritePageGuard &page_g)
+      -> std::optional<std::pair<KeyType, page_id_t>>;
+
+  auto XorKv(WritePageGuard &page_g, const KeyType &key, page_id_t val, bool is_root_hint)
       -> std::optional<std::pair<KeyType, page_id_t>>;
 
  private:
@@ -1295,4 +1300,12 @@ struct PrintableBPlusTree {
 
   如果 Root 所在的 Layer 有多个节点，且其中非 Root 节点发生 Split/Merge,
   这貌似 **也应该** 提升树高，且必须把原 Root id 加入到新 Root 进行索引。
+  - Status: Solved. Root Layer 发生分裂. 创建新 Root.
+
+  问题日志.
+  考虑按倒序将所有 kv 插入 Tree.
+  由于 Invariant: Key[0] 禁止修改, 否则会导致前一个节点的 SibLink 被破坏.
+  我们必须对最左侧的 Internal 节点 Key[0] 引入特殊状态.
+  使用 `has_valid_lowkey_`, 若为 `false`, 则此 `Key[0]` 相当于无穷小.
+  - Status: In progress.
 */

@@ -20,7 +20,7 @@
 namespace bustub {
 
 #define B_PLUS_TREE_INTERNAL_PAGE_TYPE BPlusTreeInternalPage<KeyType, ValueType, KeyComparator>
-#define INTERNAL_PAGE_HEADER_SIZE (sizeof(page_id_t) + sizeof(bool) + sizeof(KeyType))
+#define INTERNAL_PAGE_HEADER_SIZE (sizeof(page_id_t) + sizeof(bool) + sizeof(KeyType) + sizeof(bool))
 #define INTERNAL_PAGE_SLOT_CNT                                                 \
   ((BUSTUB_PAGE_SIZE - GENERAL_PAGE_HEADER_SIZE - INTERNAL_PAGE_HEADER_SIZE) / \
    ((int)(sizeof(KeyType) + sizeof(ValueType))))  // NOLINT
@@ -115,6 +115,9 @@ class BPlusTreeInternalPage : public BPlusTreePage {
   auto GetHighKey() const -> const KeyType &;
   void SetHighKey(const KeyType &);
 
+  auto HasValidLowKey() const -> bool;
+  void SetHasValidLowKey(bool);
+
   auto CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool;
   /**
    * 找 upper bound.
@@ -159,6 +162,12 @@ class BPlusTreeInternalPage : public BPlusTreePage {
    */
   bool high_key_is_valid_;
   KeyType high_key_;
+
+  /**
+   * 此 bool flag 标记指向最左侧代表无穷小的区间.
+   * 为插入比当前 Tree 中最小 key 更小的 key 提供支持.
+   */
+  bool low_key_is_valid_;
 
   /**
    * Array members for page data.

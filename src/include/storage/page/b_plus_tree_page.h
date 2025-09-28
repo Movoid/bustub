@@ -68,6 +68,9 @@ class BPlusTreePage {
   void SetMaxSize(int max_size);
   auto GetMinSize() const -> int;
 
+  auto GetLevel() const -> int;
+  void SetLevel(int level);
+
   /**
    * 只有在 `Is{Over, Under}flowedWith` 返回 `false` 时,
    * 才应该采取 Split/Merge.
@@ -101,6 +104,11 @@ class BPlusTreePage {
    * 无论什么类型节点, 都指示最大的 key 数量.
    */
   int max_size_;
+
+  /**
+   * Level.
+   */
+  int level_{};
 
   /**
    * BPlusTreePage 不需要额外的锁,

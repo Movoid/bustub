@@ -36,9 +36,10 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
   SetSize(0);
   SetMaxSize(max_size);
   SetPageType(IndexPageType::INTERNAL_PAGE);
-  next_page_id_ = INVALID_PAGE_ID;
-  high_key_is_valid_ = false;
+  SetNextPageId(INVALID_PAGE_ID);
+  SetHasValidHighKey(false);
   SetHighKey(KeyType{});
+  SetHasValidLowKey(false);
 }
 
 INDEX_TEMPLATE_ARGUMENTS
@@ -110,6 +111,12 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetHighKey() const -> const KeyType & {
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetHighKey(const KeyType &high_key) { high_key_ = high_key; }
 
+INDEX_TEMPLATE_ARGUMENTS
+auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::HasValidLowKey() const -> bool { return low_key_is_valid_; }
+
+INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetHasValidLowKey(bool is_valid) { low_key_is_valid_ = is_valid; }
+
 /**
  * InternalNode 的 `high_key_` 是 inclusive upperbound.
  * 即, 当前 Node 可能包含 `high_key_`.
@@ -124,9 +131,12 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::CoveredKey(const KeyType &key, KeyComparato
   return !high_key_is_valid_ || (GetSize() > 0 && cmp(key, high_key_) <= 0);
 }
 
+/**
+ * 此函数需要适配 `low_key` 机制.
+ */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndexUpperbound(const KeyType &key, KeyComparator &cmp) const -> int {
-  int l{0};          // [0, l) -> x <= key.
+  int l{HasValidLowKey() ? 1 : 0};  // [0, l) -> x <= key.
   int r{GetSize()};  // [r, GetSize()) -> x > key.
   while (r - l > 0) {
     int mid{l + ((r - l) / 2)};
@@ -139,9 +149,12 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndexUpperbound(const KeyType &key, Key
   return r;
 }
 
+/**
+ * 此函数需要适配 `low_key` 机制.
+ */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndexLowerbound(const KeyType &key, KeyComparator &cmp) const -> int {
-  int l{0};          // [0, l) -> x < key.
+  int l{HasValidLowKey() ? 1 : 0};  // [0, l) -> x < key.
   int r{GetSize()};  // [r, GetSize()) -> x >= key.
   while (r - l > 0) {
     int mid{l + ((r - l) / 2)};
@@ -156,12 +169,10 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndexLowerbound(const KeyType &key, Key
 
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindKv(const KeyType &key, const ValueType &val, KeyComparator &cmp) const -> int {
+  int lowerbound_idx{FindIndexLowerbound(key, cmp)};
   int upperbound_idx{FindIndexUpperbound(key, cmp)};
-  for (int i = upperbound_idx - 1; i > 0; i--) {
-    if (cmp(key, key_array_[i]) != 0) {
-      break;
-    }
-    if (page_id_array_[i] == val) {
+  for (int i = lowerbound_idx; i < upperbound_idx; i++) {
+    if (ValueAt(i) == val) {
       return i;
     }
   }

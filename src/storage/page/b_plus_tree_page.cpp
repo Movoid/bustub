@@ -35,6 +35,9 @@ void BPlusTreePage::ChangeSizeBy(int amount) { size_ += amount; }
 auto BPlusTreePage::GetMaxSize() const -> int { return max_size_; }
 void BPlusTreePage::SetMaxSize(int size) { max_size_ = size; }
 
+auto BPlusTreePage::GetLevel() const -> int { return level_; }
+void BPlusTreePage::SetLevel(int level) { level_ = level; }
+
 auto BPlusTreePage::IsOverflowed() const -> bool { return GetSize() >= GetMaxSize(); }
 
 /** 无法通过均分解决 Overflow. */
