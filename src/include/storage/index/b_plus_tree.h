@@ -30,6 +30,7 @@
 // ============================================================
 #pragma once
 #include <atomic>
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <thread>
@@ -219,7 +220,7 @@ class QSBRManager : private utils::EBODeleterStorage<DeleterType> {
    * `Epoch_` 和 `RetiredContext_` 共用 Cacheline .
    */
   std::unique_ptr<std::array<QSBRContext_, ThreadCnt>> ctxs_;
-  std::atomic<ctx_idx_t_> next_ctx_idx_;
+  std::atomic<ctx_idx_t_> next_ctx_idx_{};
 
   struct LocalEntry {
     QSBRContext_ *local_qsbr_ctx_;
@@ -269,6 +270,7 @@ class QSBRManager : private utils::EBODeleterStorage<DeleterType> {
     ctx_idx_t_ end_idx{next_ctx_idx_.load(std::memory_order_acquire)};
     FullEpochSnapshot_<ThreadCnt> snapshot{};
     for (ctx_idx_t_ i = 0; i < end_idx; i++) {
+      std::cout << "QSBR i " << i << std::endl;
       snapshot[i] = static_cast<masked_epoch_t>((*ctxs_)[i].first.load(std::memory_order_acquire) & EPOCH_MASK);
     }
     return snapshot;
@@ -1218,9 +1220,13 @@ class BPlusTree {
   /**
    * Legacy API style.
    */
-  auto GoSibUntilCoverRR(const KeyType &key, ReadPageGuard &&page_g) -> ReadPageGuard;
-  auto GoSibUntilCoverWW(const KeyType &key, WritePageGuard &&page_g) -> WritePageGuard;
-  auto GoSibUntilCoverRW(const KeyType &key, ReadPageGuard &&page_g) -> WritePageGuard;
+  [[deprecated]] auto GoSibUntilCoverRR(const KeyType &key, ReadPageGuard &&page_g) -> ReadPageGuard;
+  [[deprecated]] auto GoSibUntilCoverWW(const KeyType &key, WritePageGuard &&page_g) -> WritePageGuard;
+  [[deprecated]] auto GoSibUntilCoverRW(const KeyType &key, ReadPageGuard &&page_g) -> WritePageGuard;
+
+  auto GoSibUntilCoverRR(ReadPageGuard &page_g, const KeyType &key) -> bool;
+  auto GoSibUntilCoverWW(WritePageGuard &page_g, const KeyType &key) -> bool;
+  auto GoSibUntilCoverRW(ReadPageGuard &page_g, const KeyType &key) -> WritePageGuard;
 
   void GetPathTo(int level, const KeyType &key, PathContainer &path);
 

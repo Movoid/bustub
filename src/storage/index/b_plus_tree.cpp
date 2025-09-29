@@ -103,14 +103,14 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
   qsbr_mgr_.EnterCriticalZone();
   while (true) {
     auto page_g{bpm_->ReadPage(cur_page_id)};
-    page_g = GoSibUntilCoverRR(key, std::move(page_g));
+    GoSibUntilCoverRR(page_g, key);
 
     if (page_g.As<BPlusTreePage>()->IsLeafPage()) {
       qsbr_mgr_.ExitCriticalZone();
       // page_g = GoSibUntilCoverRR(key, std::move(page_g));
       // 目标 kv 最多只会出现在一个节点, 沿着 SibLink walk 到 Covered 节点即可.
       auto page_data{page_g.As<LeafPage>()};
-      PrintTree(page_g.GetPageId(), page_data);
+      // PrintTree(page_g.GetPageId(), page_data);
       int lowerbound_idx{page_data->FindIndexLowerbound(key, comparator_)};
       if (lowerbound_idx == page_data->GetSize() || comparator_(page_data->KeyAt(lowerbound_idx), key) != 0) {
         is_found = false;
@@ -162,7 +162,8 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
     ReadPageGuard page_g{bpm_->ReadPage(cur_root_id)};
     auto page_header_data{page_g.As<BPlusTreePage>()};
     while (!page_header_data->IsLeafPage()) {
-      page_g = GoSibUntilCoverRR(key, std::move(page_g));
+      // page_g = GoSibUntilCoverRR(key, std::move(page_g));
+      GoSibUntilCoverRR(page_g, key);
       // Is internal node. Go down.
       backfix_path.EmplaceBack(page_g.GetPageId());
       auto page_data{page_g.As<InternalPage>()};
@@ -172,13 +173,14 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
       page_header_data = page_g.As<BPlusTreePage>();
     }
 
-    WritePageGuard leaf_g_w{GoSibUntilCoverRW(key, std::move(page_g))};
+    // WritePageGuard leaf_g_w{GoSibUntilCoverRW(key, std::move(page_g))};
+    WritePageGuard leaf_g_w{GoSibUntilCoverRW(page_g, key)};
     // Split leaf?
     TrySplit(leaf_g_w, backfix_kv, backfix_path.Size() == 0, cur_root_id);
     backfix_type = backfix_kv.has_value() ? BackfixType::INSERT : BackfixType::INVALID;
     // 注意此处, 不一定要移动到 new sibling,
     // 可能目标 key 仍在当前节点.
-    leaf_g_w = GoSibUntilCoverWW(key, std::move(leaf_g_w));
+    GoSibUntilCoverWW(leaf_g_w, key);
     auto leaf_data{leaf_g_w.AsMut<LeafPage>()};
     BUSTUB_ASSERT(!leaf_data->IsOverflowed(), "Unexpected. This should be fixed before.");
     // Do some **REAL** modifications.
@@ -203,7 +205,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
         continue;
       }
       WritePageGuard page_g{bpm_->WritePage(backfix_path.Back())};
-      page_g = GoSibUntilCoverWW(key, std::move(page_g));
+      GoSibUntilCoverWW(page_g, key);
       auto page_header_data{page_g.AsMut<BPlusTreePage>()};
       if (page_header_data->GetLevel() != next_level) {
         // ? DONT_LINK?
@@ -320,67 +322,90 @@ auto BPLUSTREE_TYPE::GetFirstLeafId() -> page_id_t {
  * 后续尝试修改为 Optimistic.
  */
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::GoSibUntilCoverRR(const KeyType &key, ReadPageGuard &&page_g) -> ReadPageGuard {
-  if (page_g.As<BPlusTreePage>()->IsLeafPage()) {  // leaf
+auto BPLUSTREE_TYPE::GoSibUntilCoverRR(ReadPageGuard &page_g, const KeyType &key) -> bool {
+  bool ret{};
+  if (page_g.As<BPlusTreePage>()->IsLeafPage()) {
     while (!page_g.As<LeafPage>()->CoveredKey(key, comparator_)) {
       auto page_data{page_g.As<LeafPage>()};
-      page_g = std::move(bpm_->ReadPage(page_data->GetNextPageId()));
+      page_id_t next_page_id{page_data->GetNextPageId()};
+      page_g.Drop();
+      page_g = bpm_->ReadPage(next_page_id);
+      ret = true;
     }
-  } else {  // internal
+  } else {
     while (!page_g.As<InternalPage>()->CoveredKey(key, comparator_)) {
       auto page_data{page_g.As<InternalPage>()};
-      page_g = std::move(bpm_->ReadPage(page_data->GetNextPageId()));
+      page_id_t next_page_id{page_data->GetNextPageId()};
+      page_g.Drop();
+      page_g = bpm_->ReadPage(next_page_id);
+      ret = true;
     }
   }
-  return page_g;
+  return ret;
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::GoSibUntilCoverWW(const KeyType &key, WritePageGuard &&page_g) -> WritePageGuard {
-  if (page_g.As<BPlusTreePage>()->IsLeafPage()) {  // leaf
+auto BPLUSTREE_TYPE::GoSibUntilCoverWW(WritePageGuard &page_g, const KeyType &key) -> bool {
+  bool ret{};
+  if (page_g.As<BPlusTreePage>()->IsLeafPage()) {
     while (!page_g.As<LeafPage>()->CoveredKey(key, comparator_)) {
       auto page_data{page_g.As<LeafPage>()};
-      page_g = std::move(bpm_->WritePage(page_data->GetNextPageId()));
+      page_id_t next_page_id{page_data->GetNextPageId()};
+      page_g.Drop();
+      page_g = bpm_->WritePage(next_page_id);
+      ret = true;
     }
-  } else {  // internal
+  } else {
     while (!page_g.As<InternalPage>()->CoveredKey(key, comparator_)) {
       auto page_data{page_g.As<InternalPage>()};
-      page_g = std::move(bpm_->WritePage(page_data->GetNextPageId()));
+      page_id_t next_page_id{page_data->GetNextPageId()};
+      page_g.Drop();
+      page_g = bpm_->WritePage(next_page_id);
+      ret = true;
     }
   }
-  return page_g;
+  return ret;
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::GoSibUntilCoverRW(const KeyType &key, ReadPageGuard &&page_g) -> WritePageGuard {
+auto BPLUSTREE_TYPE::GoSibUntilCoverRW(ReadPageGuard &page_g, const KeyType &key) -> WritePageGuard {
   if (page_g.As<BPlusTreePage>()->IsLeafPage()) {  // leaf
     while (!page_g.As<LeafPage>()->CoveredKey(key, comparator_)) {
       auto page_data{page_g.As<LeafPage>()};
-      page_g = std::move(bpm_->ReadPage(page_data->GetNextPageId()));
+      page_id_t next_page_id{page_data->GetNextPageId()};
+      page_g.Drop();
+      page_g = bpm_->ReadPage(next_page_id);
     }
   } else {  // internal
     while (!page_g.As<InternalPage>()->CoveredKey(key, comparator_)) {
       auto page_data{page_g.As<InternalPage>()};
-      page_g = std::move(bpm_->ReadPage(page_data->GetNextPageId()));
+      page_id_t next_page_id{page_data->GetNextPageId()};
+      page_g.Drop();
+      page_g = bpm_->ReadPage(next_page_id);
     }
   }
 
   page_id_t cur_page_id{page_g.GetPageId()};
   page_g.Drop();
 
-  auto page_wg{bpm_->WritePage(cur_page_id)};
-  if (page_wg.As<BPlusTreePage>()->IsLeafPage()) {  // leaf
-    while (!page_wg.As<LeafPage>()->CoveredKey(key, comparator_)) {
-      auto page_data{page_wg.As<LeafPage>()};
-      page_wg = std::move(bpm_->WritePage(page_data->GetNextPageId()));
+  WritePageGuard page_g_w{bpm_->WritePage(cur_page_id)};
+  if (page_g_w.As<BPlusTreePage>()->IsLeafPage()) {  // leaf
+    while (!page_g_w.As<LeafPage>()->CoveredKey(key, comparator_)) {
+      auto page_data{page_g_w.As<LeafPage>()};
+      page_id_t next_page_id{page_data->GetNextPageId()};
+      page_g_w.Drop();
+      page_g_w = bpm_->WritePage(next_page_id);
     }
   } else {  // internal
-    while (!page_wg.As<InternalPage>()->CoveredKey(key, comparator_)) {
-      auto page_data{page_wg.As<InternalPage>()};
-      page_wg = std::move(bpm_->WritePage(page_data->GetNextPageId()));
+    while (!page_g_w.As<InternalPage>()->CoveredKey(key, comparator_)) {
+      auto page_data{page_g_w.As<InternalPage>()};
+      page_id_t next_page_id{page_data->GetNextPageId()};
+      page_g_w.Drop();
+      page_g_w = bpm_->WritePage(next_page_id);
     }
   }
-  return page_wg;
+
+  return page_g_w;
 }
 
 /**
@@ -426,7 +451,7 @@ void BPLUSTREE_TYPE::GetPathTo(int to_level, const KeyType &key, PathContainer &
   if (page_g.As<BPlusTreePage>()->IsLeafPage()) {
     return;
   }
-  page_g = GoSibUntilCoverRR(key, std::move(page_g));
+  GoSibUntilCoverRR(page_g, key);
   auto page_header_data{page_g.As<BPlusTreePage>()};
   auto page_data{page_g.As<InternalPage>()};
   path.EmplaceBack(page_g.GetPageId());
@@ -591,13 +616,13 @@ INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::BackfixInsertKv(WritePageGuard &page_g, IndexKvPack &backfix_kv, bool update_root_hint,
                                      page_id_t root_hint) -> bool {
   auto &[key, val]{backfix_kv.value()};
-  page_g = GoSibUntilCoverWW(key, std::move(page_g));
+  GoSibUntilCoverWW(page_g, key);
   auto page_data{page_g.AsMut<InternalPage>()};
   int upperbound_idx{page_data->FindIndexUpperbound(key, comparator_)};
   WritePageGuard check_page_g{bpm_->WritePage(val)};
   auto check_page_header_data{check_page_g.AsMut<BPlusTreePage>()};
   bool ret{TrySplit(page_g, backfix_kv, update_root_hint, root_hint)};
-  page_g = GoSibUntilCoverWW(key, std::move(page_g));
+  GoSibUntilCoverWW(page_g, key);
   if (check_page_header_data->GetBackfixStatus() == BackfixStatus::DONT_LINK_IN_PARENT) {
     return ret;
   }
@@ -615,7 +640,8 @@ INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::BackfixRemoveKv(WritePageGuard &page_g, IndexKvPack &backfix_kv, bool update_root_hint,
                                      page_id_t root_hint) -> bool {
   auto &[key, val]{backfix_kv.value()};
-  page_g = GoSibUntilCoverWW(key, std::move(page_g));
+  // page_g = GoSibUntilCoverWW(key, std::move(page_g));
+  GoSibUntilCoverWW(page_g, key);
   auto page_header_data{page_g.AsMut<BPlusTreePage>()};
   BUSTUB_ASSERT(!page_header_data->IsLeafPage(), "Invalid args.");
   auto page_data{page_g.AsMut<InternalPage>()};
