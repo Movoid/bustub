@@ -111,12 +111,12 @@ class BPlusTreeInternalPage : public BPlusTreePage {
    * Custom helpers.
    */
   auto HasValidHighKey() const -> bool;
-  void SetHasValidHighKey(bool);
+  void SetHasValidHighKey(bool is_valid);
   auto GetHighKey() const -> const KeyType &;
-  void SetHighKey(const KeyType &);
+  void SetHighKey(const KeyType &high_key);
 
   auto HasValidLowKey() const -> bool;
-  void SetHasValidLowKey(bool);
+  void SetHasValidLowKey(bool is_valid);
 
   auto CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool;
   /**

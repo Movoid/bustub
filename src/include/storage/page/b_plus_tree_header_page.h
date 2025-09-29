@@ -27,11 +27,6 @@ class BPlusTreeHeaderPage {
   BPlusTreeHeaderPage(const BPlusTreeHeaderPage &other) = delete;
 
   page_id_t root_page_id_;
-
-  /**
-   * This is used for traversing the leaves.
-   */
-  page_id_t first_leaf_id_;
 };
 
 }  // namespace bustub

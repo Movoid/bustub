@@ -35,8 +35,14 @@ void BPlusTreePage::ChangeSizeBy(int amount) { size_ += amount; }
 auto BPlusTreePage::GetMaxSize() const -> int { return max_size_; }
 void BPlusTreePage::SetMaxSize(int size) { max_size_ = size; }
 
-auto BPlusTreePage::GetLevel() const -> int { return level_; }
-void BPlusTreePage::SetLevel(int level) { level_ = level; }
+auto BPlusTreePage::GetLevel() const -> int {
+  BUSTUB_ASSERT(!IsLeafPage() || level_ == 1, "Unexpected.");
+  return level_;
+}
+void BPlusTreePage::SetLevel(int level) {
+  BUSTUB_ASSERT(!IsLeafPage() || level == 1, "Unexpected.");
+  level_ = level;
+}
 
 auto BPlusTreePage::GetBackfixStatus() const -> BackfixStatus {
   BUSTUB_ASSERT(backfix_status_ != BackfixStatus::INVALID, "Protocol error.");

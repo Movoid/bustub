@@ -32,6 +32,7 @@
 #include <atomic>
 #include <iostream>
 #include <memory>
+#include <new>
 #include <optional>
 #include <thread>
 #include <unordered_map>
@@ -39,7 +40,7 @@
 
 namespace simple_cu::utils {
 
-constexpr static std::size_t ALIGNMENT{std::hardware_constructive_interference_size};
+constexpr static std::size_t ALIGNMENT{64};
 
 /**
  * WARNING: Never use this class with polymorphism.
@@ -63,7 +64,7 @@ struct alignas(ALIGNMENT) Aligned<ValType, std::enable_if_t<!std::is_class_v<Val
   ValType val_;
 
   explicit Aligned(const ValType &v) : val_(v) {}
-  Aligned &operator=(const ValType &v) {
+  auto operator=(const ValType &v) -> Aligned & {
     val_ = v;
     return *this;
   }
@@ -142,9 +143,9 @@ class RetiredContext {
     }
   }
   RetiredContext(const RetiredContext &obj) = delete;
-  RetiredContext &operator=(const RetiredContext &obj) = delete;
+  auto operator=(const RetiredContext &obj) -> RetiredContext & = delete;
   RetiredContext(RetiredContext &&obj) = delete;
-  RetiredContext &operator=(RetiredContext &&obj) = delete;
+  auto operator=(RetiredContext &&obj) -> RetiredContext & = delete;
 
   auto GetCnt() -> std::uint64_t { return cnt_.load(std::memory_order_relaxed); }
 
@@ -270,7 +271,6 @@ class QSBRManager : private utils::EBODeleterStorage<DeleterType> {
     ctx_idx_t_ end_idx{next_ctx_idx_.load(std::memory_order_acquire)};
     FullEpochSnapshot_<ThreadCnt> snapshot{};
     for (ctx_idx_t_ i = 0; i < end_idx; i++) {
-      std::cout << "QSBR i " << i << std::endl;
       snapshot[i] = static_cast<masked_epoch_t>((*ctxs_)[i].first.load(std::memory_order_acquire) & EPOCH_MASK);
     }
     return snapshot;
@@ -1217,20 +1217,12 @@ class BPlusTree {
   // auto GoByLink(const KeyType &key, ReadPageGuard &&page_g) -> ReadPageGuard;
   // auto GoByLink(const KeyType &key, WritePageGuard &&page_g) -> WritePageGuard;
 
-  /**
-   * Legacy API style.
-   */
-  [[deprecated]] auto GoSibUntilCoverRR(const KeyType &key, ReadPageGuard &&page_g) -> ReadPageGuard;
-  [[deprecated]] auto GoSibUntilCoverWW(const KeyType &key, WritePageGuard &&page_g) -> WritePageGuard;
-  [[deprecated]] auto GoSibUntilCoverRW(const KeyType &key, ReadPageGuard &&page_g) -> WritePageGuard;
-
   auto GoSibUntilCoverRR(ReadPageGuard &page_g, const KeyType &key) -> bool;
   auto GoSibUntilCoverWW(WritePageGuard &page_g, const KeyType &key) -> bool;
-  auto GoSibUntilCoverRW(ReadPageGuard &page_g, const KeyType &key) -> WritePageGuard;
+  [[nodiscard]] auto GoSibUntilCoverRW(ReadPageGuard &page_g, const KeyType &key) -> WritePageGuard;
 
   void GetPathTo(int level, const KeyType &key, PathContainer &path);
 
-  [[deprecated]] auto TrySplitLegacy(WritePageGuard &page_g, IndexKvPack &backfix_kv, bool is_root_hint) -> bool;
   auto TrySplit(WritePageGuard &page_g, IndexKvPack &backfix_kv, bool update_root_hint, page_id_t root_hint) -> bool;
   auto TryMerge(WritePageGuard &page_g, IndexKvPack &backfix_kv, bool update_root_hint, page_id_t root_hint) -> bool;
 
@@ -1269,8 +1261,18 @@ class BPlusTree {
   /**
    * `header_page_id_` 记录了 BPlusTree root 的 page id.
    * 每次遍历应该从此 page 读取 root page id.
+   *
+   * 为 root id 单独使用一个 page 是必要的,
+   * 因为需要支持多线程并发修改 root.
    */
   page_id_t header_page_id_;
+
+  /**
+   * init root id.
+   *
+   * 永远不变, 实际不需要放进 header page.
+   */
+  page_id_t init_root_id_;
 
   /**
    * 神秘小工具
