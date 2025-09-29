@@ -37,9 +37,16 @@ enum class IndexPageType : std::uint8_t {
  * Backfix Protocol Status.
  */
 enum class BackfixStatus : std::uint8_t {
+  INVALID,
   NOT_LINKED_IN_PARENT,
   IS_LINKED_IN_PARENT,
   DONT_LINK_IN_PARENT,
+};
+
+enum class BackfixType : std::uint8_t {
+  INVALID,
+  INSERT,
+  REMOVE,
 };
 
 /**
@@ -84,6 +91,9 @@ class BPlusTreePage {
   auto GetLevel() const -> int;
   void SetLevel(int level);
 
+  auto GetBackfixStatus() const -> BackfixStatus;
+  void SetBackfixStatus(BackfixStatus status);
+
   /**
    * 只有在 `Is{Over, Under}flowedWith` 返回 `false` 时,
    * 才应该采取 Split/Merge.
@@ -122,6 +132,11 @@ class BPlusTreePage {
    * Level.
    */
   int level_{};
+
+  /**
+   * Backfix status.
+   */
+  BackfixStatus backfix_status_;
 
   /**
    * BPlusTreePage 不需要额外的锁,

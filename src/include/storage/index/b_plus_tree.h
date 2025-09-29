@@ -1155,6 +1155,13 @@ class BPlusTree {
   using LeafPage = BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>;
   using PathContainer = meow_utils::SmallVector<page_id_t, 8>;
 
+  struct IndexKvPackImpl {
+    KeyType key_;
+    page_id_t val_;
+  };
+
+  using IndexKvPack = std::optional<IndexKvPackImpl>;
+
  public:
   /**
    * BPlusTree 构造函数.
@@ -1217,14 +1224,26 @@ class BPlusTree {
 
   void GetPathTo(int level, const KeyType &key, PathContainer &path);
 
-  auto TrySplit(WritePageGuard &page_g, bool is_root_hint) -> std::optional<std::pair<KeyType, page_id_t>>;
-  auto TryMerge(WritePageGuard &page_g, bool is_root_hint) -> std::optional<std::pair<KeyType, page_id_t>>;
+  [[deprecated]] auto TrySplitLegacy(WritePageGuard &page_g, IndexKvPack &backfix_kv, bool is_root_hint) -> bool;
+  auto TrySplit(WritePageGuard &page_g, IndexKvPack &backfix_kv, bool update_root_hint, page_id_t root_hint) -> bool;
+  auto TryMerge(WritePageGuard &page_g, IndexKvPack &backfix_kv, bool update_root_hint, page_id_t root_hint) -> bool;
 
-  auto TryDeleteWhileScan(const KeyType &key, const InternalPageValueType &val, WritePageGuard &page_g)
-      -> std::optional<std::pair<KeyType, page_id_t>>;
+  /**
+   * 这两个应该由 TrySplit/TryMerge 调用.
+   *
+   * Update: 也许在上层调用更好, 不应该和 Split/Merge 耦合.
+   *
+   * Update: 只能由 TrySplit/TryMerge 调用.
+   * 因为只有 TryMerge 才有相关节点的详细信息, 才能更准确判断何时 DeleteRoot.
+   */
+  auto TryNewRoot(page_id_t check_root_id, int new_level) -> bool;
+  auto TryDeleteRoot(page_id_t check_root_id, page_id_t new_root_id) -> bool;
 
-  auto XorKv(WritePageGuard &page_g, const KeyType &key, page_id_t val, bool is_root_hint)
-      -> std::optional<std::pair<KeyType, page_id_t>>;
+  auto BackfixInsertKv(WritePageGuard &page_g, IndexKvPack &backfix_kv, bool update_root_hint, page_id_t root_hint)
+      -> bool;
+
+  auto BackfixRemoveKv(WritePageGuard &page_g, IndexKvPack &backfix_kv, bool update_root_hint, page_id_t root_hint)
+      -> bool;
 
  private:
   void ToGraph(page_id_t page_id, const BPlusTreePage *page, std::ofstream &out);

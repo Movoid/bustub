@@ -38,6 +38,16 @@ void BPlusTreePage::SetMaxSize(int size) { max_size_ = size; }
 auto BPlusTreePage::GetLevel() const -> int { return level_; }
 void BPlusTreePage::SetLevel(int level) { level_ = level; }
 
+auto BPlusTreePage::GetBackfixStatus() const -> BackfixStatus {
+  BUSTUB_ASSERT(backfix_status_ != BackfixStatus::INVALID, "Protocol error.");
+  return backfix_status_;
+}
+
+void BPlusTreePage::SetBackfixStatus(BackfixStatus status) {
+  // BUSTUB_ASSERT(status != BackfixStatus::INVALID, "Protocol error.");
+  backfix_status_ = status;
+}
+
 auto BPlusTreePage::IsOverflowed() const -> bool { return GetSize() >= GetMaxSize(); }
 
 /** 无法通过均分解决 Overflow. */

@@ -40,6 +40,7 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
   SetHasValidHighKey(false);
   SetHighKey(KeyType{});
   SetHasValidLowKey(false);
+  SetBackfixStatus(BackfixStatus::NOT_LINKED_IN_PARENT);
 }
 
 INDEX_TEMPLATE_ARGUMENTS

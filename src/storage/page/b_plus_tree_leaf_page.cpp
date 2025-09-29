@@ -37,9 +37,11 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::Init(int max_size) {
   SetSize(0);
   SetMaxSize(max_size);
   SetPageType(IndexPageType::LEAF_PAGE);
-  next_page_id_ = INVALID_PAGE_ID;
-  high_key_is_valid_ = false;
+  SetNextPageId(INVALID_PAGE_ID);
+  SetHasValidHighKey(false);
   SetHighKey(KeyType{});
+  SetHasValidHighKey(false);
+  SetBackfixStatus(BackfixStatus::NOT_LINKED_IN_PARENT);
 }
 
 /**
