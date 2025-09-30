@@ -247,8 +247,9 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
 INDEX_TEMPLATE_ARGUMENTS
 void BPLUSTREE_TYPE::Remove(const KeyType &key) {
   // Declaration of context instance.
-  Context ctx;
-  UNIMPLEMENTED("TODO(P2): Add implementation.");
+
+  std::cout << "UNIMPLEMENTED: Remove operation is called." << std::endl;
+  UNIMPLEMENTED("Remove");
 }
 
 /*****************************************************************************
