@@ -158,6 +158,10 @@ auto BufferPoolManager::FlushPageAsyncUnsafe(page_id_t page_id, frame_id_t frame
   return fut;
 }
 
+/**
+ * 此函数将某个 page 驱逐,
+ * 但并不会将其从 metadata 中删除.
+ */
 auto BufferPoolManager::AcquireNewFrameUnsafe() -> frame_id_t {
   frame_id_t frame_id{INVALID_FRAME_ID};
   if (free_frames_.empty()) {  // Evict.
@@ -203,31 +207,47 @@ auto BufferPoolManager::FindFrameUnsafe(page_id_t page_id) -> frame_id_t {
  * @return The page ID of the newly allocated page.
  */
 auto BufferPoolManager::NewPage() -> page_id_t {
-  page_id_t page_id{next_page_id_.fetch_add(1, std::memory_order_relaxed)};
-  frame_id_t frame_id{INVALID_FRAME_ID};
-  page_id_t old_page_id{INVALID_PAGE_ID};
-  {
-    std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
-    frame_id = AcquireNewFrameUnsafe();
-    if (frame_id == INVALID_FRAME_ID) {
-      return INVALID_PAGE_ID;
-    }
-  }
-  {
-    std::lock_guard<std::shared_mutex> frame_guard{frames_[frame_id]->rwlatch_};
-    FrameHeader &frame{*frames_[frame_id]};
-    old_page_id = frame.page_id_;
-    if (frame.page_id_ != INVALID_PAGE_ID && frame.is_dirty_) {
-      FlushPageAsyncUnsafe(frame.page_id_, frame_id);
-    }
+  while (true) {
+    page_id_t page_id{next_page_id_.fetch_add(1, std::memory_order_relaxed)};
+    frame_id_t frame_id{INVALID_FRAME_ID};
+    page_id_t old_page_id{INVALID_PAGE_ID};
     {
       std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
-      ReleaseNewFrameUnsafe(old_page_id, page_id, frame_id, true);  // Evictable
+      frame_id = AcquireNewFrameUnsafe();
+      if (frame_id == INVALID_FRAME_ID) {
+        return INVALID_PAGE_ID;
+      }
     }
-    frame.Reset();
-    frame.page_id_ = page_id;
+    /**
+     * 此处存在 Race Window,
+     * 可能有另一个线程将此来自 `Evict` 的 page pinned.
+     * 对于来自 `free_list_` 的 frame, 其不可能还有其他线程正在使用.
+     * 所以二次检查只需要判断
+     */
+    {
+      std::lock_guard<std::shared_mutex> frame_guard{frames_[frame_id]->rwlatch_};
+      FrameHeader &frame{*frames_[frame_id]};
+      old_page_id = frame.page_id_;
+      if (frame.page_id_ != INVALID_PAGE_ID && frame.is_dirty_) {
+        FlushPageAsyncUnsafe(frame.page_id_, frame_id);
+      }
+      {
+        std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
+        /**
+         * 当前 page 不可能被另一个线程换入到已有的 frame,
+         * 因为是通过 `next_page_id_` atomic fadd 得到的 id.
+         * 如果未来改为 freelist, 此处可能需要更多考虑.
+         */
+        if (frame.pin_count_ > 0) {
+          continue;
+        }
+        ReleaseNewFrameUnsafe(old_page_id, page_id, frame_id, true);  // Evictable
+      }
+      frame.Reset();
+      frame.page_id_ = page_id;
+    }
+    return page_id;
   }
-  return page_id;
 }
 
 /**
