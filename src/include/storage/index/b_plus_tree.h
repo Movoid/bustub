@@ -198,7 +198,7 @@ namespace simple_cu::qsbr {
 template <std::size_t ThreadCnt, typename ValType, typename DeleterType = utils::DefaultDeleter<ValType>>
 class QSBRManager : private utils::EBODeleterStorage<DeleterType> {
  private:
-  static_assert(ThreadCnt <= std::numeric_limits<std::uint16_t>::max(), "Too much threads.");
+  static_assert(ThreadCnt <= std::numeric_limits<std::uint16_t>::max(), "Too many threads.");
   using DeleterStorage_ = utils::EBODeleterStorage<DeleterType>;
 
   using epoch_t_ = std::uint32_t;
@@ -266,11 +266,15 @@ class QSBRManager : private utils::EBODeleterStorage<DeleterType> {
     return snapshot;
   }
 
-  /** 栈上分配定长的 `FullEpochSnapshot_<ThreadCnt>` 避免 `new` 带来的锁开销. */
+  /**
+   * 栈上分配定长的 `FullEpochSnapshot_<ThreadCnt>` 避免 `new` 带来的锁开销.
+   * 全量快照避免某些奇怪的 Race,
+   * 若只 snapshot [0, `end_idx`),
+   * 不能保证其他线程 CriticalEpochs 有比 `end_idx` 更大的记录.
+   */
   auto SnapshotFullEpochs() -> FullEpochSnapshot_<ThreadCnt> {
-    ctx_idx_t_ end_idx{next_ctx_idx_.load(std::memory_order_acquire)};
     FullEpochSnapshot_<ThreadCnt> snapshot{};
-    for (ctx_idx_t_ i = 0; i < end_idx; i++) {
+    for (ctx_idx_t_ i = 0; i < static_cast<ctx_idx_t_>(ThreadCnt); i++) {
       snapshot[i] = static_cast<masked_epoch_t>((*ctxs_)[i].first.load(std::memory_order_acquire) & EPOCH_MASK);
     }
     return snapshot;
@@ -355,6 +359,15 @@ class QSBRManager : private utils::EBODeleterStorage<DeleterType> {
     return retired_ctx.GetCnt();
   }
 
+  auto GetRetiredCntGlobal() -> std::uint64_t {
+    std::uint64_t cnt_sum{};
+    for (ctx_idx_t_ i = 0; i < static_cast<ctx_idx_t_>(ThreadCnt); i++) {
+      RetiredContext_ &retired_ctx{(*ctxs_)[i].second};
+      cnt_sum += retired_ctx.GetCnt();
+    }
+    return cnt_sum;
+  }
+
   void Retire(ValType &&val) {
     auto context{GetContext()};
     if (!context.has_value()) {
@@ -373,6 +386,18 @@ class QSBRManager : private utils::EBODeleterStorage<DeleterType> {
     QSBRContext_ *ctx{context.value().local_qsbr_ctx_};
     RetiredContext_ &retired_ctx{ctx->second};
     retired_ctx.Reclaim(SnapshotFullEpochs(), this->GetDeleter());
+  }
+
+  /**
+   * 设计上 `ReclaimGlobalUnsafe` 不是线程安全的, 不允许并发.
+   * 这只允许在所有线程结束后使用.
+   */
+  void ReclaimGlobalUnsafe() {
+    ctx_idx_t_ end_idx{next_ctx_idx_.load(std::memory_order_acquire)};
+    for (ctx_idx_t_ i = 0; i < end_idx; i++) {
+      RetiredContext_ &retired_ctx{(*ctxs_)[i].second};
+      retired_ctx.Reclaim(SnapshotFullEpochs(), this->GetDeleter());
+    }
   }
 };
 
