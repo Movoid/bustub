@@ -37,23 +37,16 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
   SetMaxSize(max_size);
   SetPageType(IndexPageType::INTERNAL_PAGE);
   SetNextPageId(INVALID_PAGE_ID);
-  SetHasValidHighKey(false);
-  SetHighKey(KeyType{});
-  SetHasValidLowKey(false);
+  SetHighKey(std::nullopt);
+  SetLowKey(std::nullopt);
   SetBackfixStatus(BackfixStatus::NOT_LINKED_IN_PARENT);
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetNextPageId() const -> page_id_t {
-  // BUSTUB_ASSERT(next_page_id_ > 0, "Memory corrupted?");
-  return next_page_id_;
-}
+auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetNextPageId() const -> page_id_t { return next_page_id_; }
 
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetNextPageId(page_id_t next_page_id) {
-  // BUSTUB_ASSERT(next_page_id_ > 0, "Memory corrupted?");
-  next_page_id_ = next_page_id;
-}
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetNextPageId(page_id_t next_page_id) { next_page_id_ = next_page_id; }
 
 /**
  * @brief Helper method to get/set the key associated with input "index"(a.k.a
@@ -63,8 +56,8 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetNextPageId(page_id_t next_page_id) {
  * @return Key at index
  */
 INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::KeyAt(int index) const -> KeyType {
-  BUSTUB_ASSERT(0 <= index && static_cast<std::uint64_t>(index) < INTERNAL_PAGE_SLOT_CNT, "Invalid index.");
+auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::KeyAt(int index) const -> const KeyType & {
+  BUSTUB_ASSERT(0 <= index && index < GetSize(), "Invalid args.");
   return key_array_[index];
 }
 
@@ -76,7 +69,7 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::KeyAt(int index) const -> KeyType {
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetKeyAt(int index, const KeyType &key) {
-  BUSTUB_ASSERT(0 <= index && static_cast<std::uint64_t>(index) < INTERNAL_PAGE_SLOT_CNT, "Invalid index.");
+  BUSTUB_ASSERT(0 <= index && index < GetSize(), "Invalid args.");
   key_array_[index] = key;
 }
 
@@ -89,34 +82,48 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetKeyAt(int index, const KeyType &key) {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::ValueAt(int index) const -> const ValueType & {
-  BUSTUB_ASSERT(0 <= index && static_cast<std::uint64_t>(index) < INTERNAL_PAGE_SLOT_CNT, "Invalid index.");
+  BUSTUB_ASSERT(0 <= index && index < GetSize(), "Invalid args.");
   return page_id_array_[index];
 }
 
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::HasValidHighKey() const -> bool {
-  BUSTUB_ASSERT(high_key_is_valid_ || (!high_key_is_valid_ && (GetSize() == 0 || GetNextPageId() == INVALID_PAGE_ID)),
-                "Invariant broken.");
-  return high_key_is_valid_;
+  BUSTUB_ASSERT(!highkey_valid_ || GetNextPageId() != INVALID_PAGE_ID, "Invariant broken.");
+  BUSTUB_ASSERT(GetSize() != 0 || highkey_valid_, "Invariant broken.");
+  return highkey_valid_;
 }
-
-INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetHasValidHighKey(bool is_valid) { high_key_is_valid_ = is_valid; }
 
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetHighKey() const -> const KeyType & {
-  BUSTUB_ASSERT(high_key_is_valid_, "Memory corrupted?");
-  return high_key_;
+  BUSTUB_ASSERT(HasValidHighKey(), "Memory corrupted?");
+  return highkey_;
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetHighKey(const KeyType &high_key) { high_key_ = high_key; }
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetHighKey(const KeyType &high_key) {
+  highkey_ = high_key;
+  highkey_valid_ = true;
+}
+INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetHighKey(std::nullopt_t null) { highkey_valid_ = false; }
 
 INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::HasValidLowKey() const -> bool { return low_key_is_valid_; }
+auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::HasValidLowKey() const -> bool { return lowkey_valid_; }
 
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetHasValidLowKey(bool is_valid) { low_key_is_valid_ = is_valid; }
+auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetLowKey() const -> const KeyType & {
+  BUSTUB_ASSERT(HasValidLowKey(), "Memory corrupted?");
+  return KeyAt(0);
+}
+
+INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetLowKey(const KeyType &low_key) {
+  SetKeyAt(0, low_key);
+  lowkey_valid_ = true;
+}
+
+INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetLowKey(std::nullopt_t null) { lowkey_valid_ = false; }
 
 /**
  * InternalNode 的 `high_key_` 是 inclusive upperbound.
@@ -129,7 +136,7 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetHasValidLowKey(bool is_valid) { low_key_
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool {
-  return !high_key_is_valid_ || (GetSize() > 0 && cmp(key, high_key_) <= 0);
+  return !HasValidHighKey() || (GetSize() > 0 && cmp(key, GetHighKey()) <= 0);
 }
 
 /**
@@ -137,7 +144,7 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::CoveredKey(const KeyType &key, KeyComparato
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndexUpperbound(const KeyType &key, KeyComparator &cmp) const -> int {
-  int l{HasValidLowKey() ? 1 : 0};  // [0, l) -> x <= key.
+  int l{HasValidLowKey() ? 0 : 1};  // [0, l) -> x <= key.
   int r{GetSize()};  // [r, GetSize()) -> x > key.
   while (r - l > 0) {
     int mid{l + ((r - l) / 2)};
@@ -152,10 +159,11 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndexUpperbound(const KeyType &key, Key
 
 /**
  * 此函数需要适配 `low_key` 机制.
+ * 如果 lowkey is invalid 则指向最左侧 -inf 区间.
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndexLowerbound(const KeyType &key, KeyComparator &cmp) const -> int {
-  int l{HasValidLowKey() ? 1 : 0};  // [0, l) -> x < key.
+  int l{HasValidLowKey() ? 0 : 1};  // [0, l) -> x < key.
   int r{GetSize()};  // [r, GetSize()) -> x >= key.
   while (r - l > 0) {
     int mid{l + ((r - l) / 2)};
@@ -220,7 +228,7 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage
   int r_diff_cnt{r_size - rpage_g.As<BPlusTreeInternalPage>()->GetSize()};
 
   BUSTUB_ASSERT(l_diff_cnt + r_diff_cnt == 0, "Invalid args.");
-  BUSTUB_ASSERT(l_size != 0, "This operation is denied.");
+  BUSTUB_ASSERT(l_size != 0, "Invalid operation.");
 
   auto rpage{rpage_g.AsMut<BPlusTreeInternalPage>()};
 
@@ -243,22 +251,22 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage
   SetSize(l_size);
   rpage->SetSize(r_size);
 
-  if (rpage->GetSize() == 0) {
+  if (rpage->GetSize() == 0) {  // Merge
     if (rpage->HasValidHighKey()) {
       SetHighKey(rpage->GetHighKey());
-      SetHasValidHighKey(true);
     } else {
-      SetHighKey(KeyAt(0));
+      SetHighKey(std::nullopt);
     }
-  } else {
+    rpage->SetLowKey(std::nullopt);
+    rpage->SetHighKey(GetLowKey());
+  } else {  // Split
     if (HasValidHighKey()) {
       rpage->SetHighKey(GetHighKey());
-      rpage->SetHasValidHighKey(true);
     } else {
-      rpage->SetHasValidHighKey(false);
+      rpage->SetHighKey(std::nullopt);
     }
-    SetHighKey(rpage->KeyAt(0));
-    SetHasValidHighKey(true);
+    rpage->SetLowKey(rpage->KeyAt(0));
+    SetHighKey(rpage->GetLowKey());
   }
 }
 

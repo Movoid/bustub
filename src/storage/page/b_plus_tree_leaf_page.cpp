@@ -38,9 +38,8 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::Init(int max_size) {
   SetMaxSize(max_size);
   SetPageType(IndexPageType::LEAF_PAGE);
   SetNextPageId(INVALID_PAGE_ID);
-  SetHasValidHighKey(false);
-  SetHighKey(KeyType{});
-  SetHasValidHighKey(false);
+  SetHighKey(std::nullopt);
+  SetLowKey(std::nullopt);
   SetBackfixStatus(BackfixStatus::NOT_LINKED_IN_PARENT);
 }
 
@@ -65,40 +64,61 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::SetNextPageId(page_id_t next_page_id) {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_LEAF_PAGE_TYPE::KeyAt(int index) const -> const KeyType & {
-  BUSTUB_ASSERT(0 <= index && static_cast<std::uint64_t>(index) < LEAF_PAGE_SLOT_CNT, "Invalid index.");
+  BUSTUB_ASSERT(0 <= index && index < GetSize(), "Invalid args.");
   return key_array_[index];
 }
 
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_LEAF_PAGE_TYPE::SetKeyAt(int index, const KeyType &key) {
-  BUSTUB_ASSERT(0 <= index && static_cast<std::uint64_t>(index) < LEAF_PAGE_SLOT_CNT, "Invalid index.");
+  BUSTUB_ASSERT(0 <= index && index < GetSize(), "Invalid args.");
   key_array_[index] = key;
 }
 
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_LEAF_PAGE_TYPE::ValueAt(int index) const -> const ValueType & {
-  BUSTUB_ASSERT(0 <= index && static_cast<std::uint64_t>(index) < LEAF_PAGE_SLOT_CNT, "Invalid index.");
+  BUSTUB_ASSERT(0 <= index && index < GetSize(), "Invalid args.");
   return rid_array_[index];
 }
 
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_LEAF_PAGE_TYPE::HasValidHighKey() const -> bool {
-  BUSTUB_ASSERT(high_key_is_valid_ || (!high_key_is_valid_ && (GetSize() == 0 || GetNextPageId() == INVALID_PAGE_ID)),
-                "Invariant broken.");
-  return high_key_is_valid_;
+  BUSTUB_ASSERT(!highkey_valid_ || GetNextPageId() != INVALID_PAGE_ID, "Invariant broken.");
+  // Init leaf can be empty.
+  return highkey_valid_;
 }
-
-INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_LEAF_PAGE_TYPE::SetHasValidHighKey(bool is_valid) { high_key_is_valid_ = is_valid; }
 
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_LEAF_PAGE_TYPE::GetHighKey() const -> const KeyType & {
-  BUSTUB_ASSERT(high_key_is_valid_, "Memory corrupted?");
-  return high_key_;
+  BUSTUB_ASSERT(HasValidHighKey(), "Memory corrupted?");
+  return highkey_;
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_LEAF_PAGE_TYPE::SetHighKey(const KeyType &key) { high_key_ = key; }
+void B_PLUS_TREE_LEAF_PAGE_TYPE::SetHighKey(const KeyType &high_key) {
+  highkey_ = high_key;
+  highkey_valid_ = true;
+}
+
+INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_LEAF_PAGE_TYPE::SetHighKey(std::nullopt_t null) { highkey_valid_ = false; }
+
+INDEX_TEMPLATE_ARGUMENTS
+auto B_PLUS_TREE_LEAF_PAGE_TYPE::HasValidLowKey() const -> bool { return lowkey_valid_; }
+
+INDEX_TEMPLATE_ARGUMENTS
+auto B_PLUS_TREE_LEAF_PAGE_TYPE::GetLowKey() const -> const KeyType & {
+  BUSTUB_ASSERT(HasValidLowKey(), "Memory corrupted?");
+  return lowkey_;
+}
+
+INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_LEAF_PAGE_TYPE::SetLowKey(const KeyType &low_key) {
+  lowkey_ = low_key;
+  lowkey_valid_ = true;
+}
+
+INDEX_TEMPLATE_ARGUMENTS
+void B_PLUS_TREE_LEAF_PAGE_TYPE::SetLowKey(std::nullopt_t null) { lowkey_valid_ = false; }
 
 /**
  * 和 InternalNode 不同,
@@ -113,7 +133,7 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::SetHighKey(const KeyType &key) { high_key_ = ke
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_LEAF_PAGE_TYPE::CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool {
-  return !high_key_is_valid_ || (GetSize() > 0 && cmp(key, high_key_) < 0);
+  return !HasValidHighKey() || (GetSize() > 0 && cmp(key, GetHighKey()) < 0);
 }
 
 INDEX_TEMPLATE_ARGUMENTS
@@ -216,22 +236,30 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage_g, 
   SetSize(l_size);
   rpage->SetSize(r_size);
 
-  if (rpage->GetSize() == 0) {
+  /**
+   * WARNING: Leaf Node 的 lowkey 允许和 `key[0]` 不相等.
+   * 不要随意修改 lowkey.
+   */
+
+  if (rpage->GetSize() == 0) {  // Merge
     if (rpage->HasValidHighKey()) {
       SetHighKey(rpage->GetHighKey());
-      SetHasValidHighKey(true);
     } else {
-      SetHighKey(KeyAt(0));
+      SetHighKey(std::nullopt);
     }
-  } else {
+    rpage->SetLowKey(std::nullopt);
+    /**
+     * Leave `rpage` highkey unset.
+     * Because this page may have invalid lowkey.
+     */
+  } else {  // Split
     if (HasValidHighKey()) {
       rpage->SetHighKey(GetHighKey());
-      rpage->SetHasValidHighKey(true);
     } else {
-      rpage->SetHasValidHighKey(false);
+      rpage->SetHighKey(std::nullopt);
     }
-    SetHighKey(rpage->KeyAt(0));
-    SetHasValidHighKey(true);
+    rpage->SetLowKey(rpage->KeyAt(0));
+    SetHighKey(rpage->GetLowKey());
   }
 
   // Should **NOT** modify SibLink here.

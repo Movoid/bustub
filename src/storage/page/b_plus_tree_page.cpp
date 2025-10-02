@@ -35,36 +35,6 @@ void BPlusTreePage::ChangeSizeBy(int amount) { size_ += amount; }
 auto BPlusTreePage::GetMaxSize() const -> int { return max_size_; }
 void BPlusTreePage::SetMaxSize(int size) { max_size_ = size; }
 
-auto BPlusTreePage::GetLevel() const -> int {
-  BUSTUB_ASSERT(!IsLeafPage() || level_ == 1, "Unexpected.");
-  return level_;
-}
-void BPlusTreePage::SetLevel(int level) {
-  BUSTUB_ASSERT(!IsLeafPage() || level == 1, "Unexpected.");
-  level_ = level;
-}
-
-auto BPlusTreePage::GetBackfixStatus() const -> BackfixStatus {
-  BUSTUB_ASSERT(backfix_status_ != BackfixStatus::INVALID, "Protocol error.");
-  return backfix_status_;
-}
-
-void BPlusTreePage::SetBackfixStatus(BackfixStatus status) {
-  // BUSTUB_ASSERT(status != BackfixStatus::INVALID, "Protocol error.");
-  backfix_status_ = status;
-}
-
-auto BPlusTreePage::IsOverflowed() const -> bool { return GetSize() >= GetMaxSize(); }
-
-/** 无法通过均分解决 Overflow. */
-auto BPlusTreePage::IsOverflowedAfterMergeWith(WritePageGuard &rpage_g) const -> bool {
-  int cnt_sum{GetSize() + rpage_g.As<BPlusTreePage>()->GetSize()};
-  /** Ceil. */
-  return (cnt_sum + 1) / 2 >= GetMaxSize();
-}
-
-auto BPlusTreePage::IsUnderflowed() const -> bool { return GetSize() <= GetMinSize(); }
-
 /*
  * Helper method to get min page size
  * Generally, min page size == max page size / 2
@@ -92,6 +62,46 @@ auto BPlusTreePage::GetMinSize() const -> int {
   BUSTUB_ASSERT(ret >= 0, "`max_size_` is too small.");
   return ret;
 }
+
+auto BPlusTreePage::GetLevel() const -> int {
+  BUSTUB_ASSERT(!IsLeafPage() || level_ == 1, "Unexpected.");
+  return level_;
+}
+void BPlusTreePage::SetLevel(int level) {
+  BUSTUB_ASSERT(!IsLeafPage() || level == 1, "Unexpected.");
+  level_ = level;
+}
+
+auto BPlusTreePage::GetBackfixStatus() const -> BackfixStatus {
+  BUSTUB_ASSERT(backfix_status_ != BackfixStatus::INVALID, "Protocol error.");
+  return backfix_status_;
+}
+
+void BPlusTreePage::SetBackfixStatus(BackfixStatus status) {
+  // BUSTUB_ASSERT(status != BackfixStatus::INVALID, "Protocol error.");
+  backfix_status_ = status;
+}
+
+auto BPlusTreePage::GetLinkedParentId() const -> page_id_t {
+  BUSTUB_ASSERT(backfix_status_ == BackfixStatus::IS_LINKED_IN_PARENT, "Protocol error.");
+  return linked_parent_id_;
+}
+
+void BPlusTreePage::SetLinkedParentId(page_id_t parent_id) {
+  BUSTUB_ASSERT(GetBackfixStatus() == BackfixStatus::IS_LINKED_IN_PARENT, "Protocol error.");
+  linked_parent_id_ = parent_id;
+}
+
+auto BPlusTreePage::IsOverflowed() const -> bool { return GetSize() >= GetMaxSize(); }
+
+/** 无法通过均分解决 Overflow. */
+auto BPlusTreePage::IsOverflowedAfterMergeWith(WritePageGuard &rpage_g) const -> bool {
+  int cnt_sum{GetSize() + rpage_g.As<BPlusTreePage>()->GetSize()};
+  /** Ceil. */
+  return (cnt_sum + 1) / 2 > GetMaxSize();
+}
+
+auto BPlusTreePage::IsUnderflowed() const -> bool { return GetSize() <= GetMinSize(); }
 
 /**
 关于 min_size_ 的计算草稿.

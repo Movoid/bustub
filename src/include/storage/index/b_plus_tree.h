@@ -1247,6 +1247,8 @@ class BPlusTree {
                      const KeyComparator &comparator, int leaf_max_size = LEAF_PAGE_SLOT_CNT,
                      int internal_max_size = INTERNAL_PAGE_SLOT_CNT);
 
+  ~BPlusTree();
+
   // Returns true if this B+ tree has no keys and values.
   auto IsEmpty() const -> bool;
 
@@ -1261,9 +1263,6 @@ class BPlusTree {
 
   // Return the page id of the root node
   auto GetRootPageId() -> page_id_t;
-
-  // Return the page id of the root node
-  auto GetFirstLeafId() -> page_id_t;
 
   // Index iterator
   auto Begin() -> INDEXITERATOR_TYPE;
@@ -1292,12 +1291,12 @@ class BPlusTree {
 
   auto GoSibUntilCoverRR(ReadPageGuard &page_g, const KeyType &key) -> bool;
   auto GoSibUntilCoverWW(WritePageGuard &page_g, const KeyType &key) -> bool;
-  [[nodiscard]] auto GoSibUntilCoverRW(ReadPageGuard &page_g, const KeyType &key) -> WritePageGuard;
+  [[nodiscard]] auto GoSibUntilCoverRW(ReadPageGuard &&page_g, const KeyType &key) -> WritePageGuard;
 
   void GetPathTo(int level, const KeyType &key, PathContainer &path);
 
-  auto TrySplit(WritePageGuard &page_g, IndexKvPack &backfix_kv, bool update_root_hint, page_id_t root_hint) -> bool;
-  auto TryMerge(WritePageGuard &page_g, IndexKvPack &backfix_kv, bool update_root_hint, page_id_t root_hint) -> bool;
+  auto TrySplit(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool;
+  auto TryMerge(WritePageGuard &page_g, IndexKvPack &backfix_kv, page_id_t &parent_id) -> bool;
 
   /**
    * 这两个应该由 TrySplit/TryMerge 调用.
@@ -1307,14 +1306,12 @@ class BPlusTree {
    * Update: 只能由 TrySplit/TryMerge 调用.
    * 因为只有 TryMerge 才有相关节点的详细信息, 才能更准确判断何时 DeleteRoot.
    */
-  auto TryNewRoot(page_id_t check_root_id, int new_level) -> bool;
-  auto TryDeleteRoot(page_id_t check_root_id, page_id_t new_root_id) -> bool;
+  auto TryNewRoot(page_id_t &check_root_id, int new_level) -> bool;
+  auto TryDeleteRoot(page_id_t &check_root_id) -> bool;
 
-  auto BackfixInsertKv(WritePageGuard &page_g, IndexKvPack &backfix_kv, bool update_root_hint, page_id_t root_hint)
-      -> bool;
+  auto BackfixInsertKv(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool;
 
-  auto BackfixRemoveKv(WritePageGuard &page_g, IndexKvPack &backfix_kv, bool update_root_hint, page_id_t root_hint)
-      -> bool;
+  auto BackfixRemoveKv(WritePageGuard &page_g, IndexKvPack &backfix_kv, page_id_t &parent_id) -> bool;
 
  private:
   void ToGraph(page_id_t page_id, const BPlusTreePage *page, std::ofstream &out);
@@ -1339,13 +1336,6 @@ class BPlusTree {
    * 因为需要支持多线程并发修改 root.
    */
   page_id_t header_page_id_;
-
-  /**
-   * init root id.
-   *
-   * 永远不变, 实际不需要放进 header page.
-   */
-  page_id_t init_root_id_;
 
   /**
    * 神秘小工具
@@ -1407,5 +1397,12 @@ struct PrintableBPlusTree {
   由于 Invariant: Key[0] 禁止修改, 否则会导致前一个节点的 SibLink 被破坏.
   我们必须对最左侧的 Internal 节点 Key[0] 引入特殊状态.
   使用 `has_valid_lowkey_`, 若为 `false`, 则此 `Key[0]` 相当于无穷小.
-  - Status: In progress.
+  - Status: Solved. 对 Internal 节点引入 lowkey 机制.
+
+  问题日志.
+  Leaf Node 的 kv[0] 删除机制存在缺陷.
+  必须给 Leaf Node 添加一个持久的 lowkey, 类似 Internal Node.
+  以及, 从左向右的 Merge 永远不被允许, 这会破坏 Sibling 的 lowkey.
+  同理, 从右向左的 Split 也不被允许, 同样破坏当前节点的 lowkey.
+  - Statue: In progress.
 */

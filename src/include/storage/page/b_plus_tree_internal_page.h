@@ -20,7 +20,7 @@
 namespace bustub {
 
 #define B_PLUS_TREE_INTERNAL_PAGE_TYPE BPlusTreeInternalPage<KeyType, ValueType, KeyComparator>
-#define INTERNAL_PAGE_HEADER_SIZE (sizeof(page_id_t) + sizeof(bool) + sizeof(KeyType) + sizeof(bool))
+#define INTERNAL_PAGE_HEADER_SIZE (sizeof(page_id_t) + sizeof(std::optional<KeyType>) * 2)
 #define INTERNAL_PAGE_SLOT_CNT                                                 \
   ((BUSTUB_PAGE_SIZE - GENERAL_PAGE_HEADER_SIZE - INTERNAL_PAGE_HEADER_SIZE) / \
    ((int)(sizeof(KeyType) + sizeof(ValueType))))  // NOLINT
@@ -70,7 +70,7 @@ class BPlusTreeInternalPage : public BPlusTreePage {
   // Helper methods
   auto GetNextPageId() const -> page_id_t;
   void SetNextPageId(page_id_t next_page_id);
-  auto KeyAt(int index) const -> KeyType;
+  auto KeyAt(int index) const -> const KeyType &;
   void SetKeyAt(int index, const KeyType &key);
 
   /**
@@ -111,12 +111,14 @@ class BPlusTreeInternalPage : public BPlusTreePage {
    * Custom helpers.
    */
   auto HasValidHighKey() const -> bool;
-  void SetHasValidHighKey(bool is_valid);
   auto GetHighKey() const -> const KeyType &;
-  void SetHighKey(const KeyType &high_key);
+  void SetHighKey(const KeyType &key);
+  void SetHighKey(std::nullopt_t null);
 
   auto HasValidLowKey() const -> bool;
-  void SetHasValidLowKey(bool is_valid);
+  auto GetLowKey() const -> const KeyType &;
+  void SetLowKey(const KeyType &key);
+  void SetLowKey(std::nullopt_t null);
 
   auto CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool;
   /**
@@ -160,14 +162,16 @@ class BPlusTreeInternalPage : public BPlusTreePage {
    * 只有最右侧节点 `high_key_is_valid_ == false`.
    * 空节点的 `high_key_` 仍有效.
    */
-  bool high_key_is_valid_;
-  KeyType high_key_;
+  bool highkey_valid_;
+  KeyType highkey_;
 
   /**
    * 此 bool flag 标记指向最左侧代表无穷小的区间.
    * 为插入比当前 Tree 中最小 key 更小的 key 提供支持.
+   *
+   * NOTE: 在所有情况下, `lowkey_` 应该和 `key[0]` 相等.
    */
-  bool low_key_is_valid_;
+  bool lowkey_valid_;
 
   /**
    * Array members for page data.

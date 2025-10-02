@@ -21,7 +21,7 @@
 namespace bustub {
 
 #define B_PLUS_TREE_LEAF_PAGE_TYPE BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>
-#define LEAF_PAGE_HEADER_SIZE (sizeof(page_id_t) + sizeof(bool) + sizeof(KeyType))
+#define LEAF_PAGE_HEADER_SIZE (sizeof(page_id_t) + sizeof(std::optional<KeyType>) * 2)
 #define LEAF_PAGE_SLOT_CNT \
   ((BUSTUB_PAGE_SIZE - GENERAL_PAGE_HEADER_SIZE - LEAF_PAGE_HEADER_SIZE) / (sizeof(KeyType) + sizeof(ValueType)))
 
@@ -103,9 +103,14 @@ class BPlusTreeLeafPage : public BPlusTreePage {
    * Custom helpers.
    */
   auto HasValidHighKey() const -> bool;
-  void SetHasValidHighKey(bool);
   auto GetHighKey() const -> const KeyType &;
-  void SetHighKey(const KeyType &key);
+  void SetHighKey(const KeyType &high_key);
+  void SetHighKey(std::nullopt_t null);
+
+  auto HasValidLowKey() const -> bool;
+  auto GetLowKey() const -> const KeyType &;
+  void SetLowKey(const KeyType &low_key);
+  void SetLowKey(std::nullopt_t null);
 
   /**
    * 和 InternalNode 不同,
@@ -149,8 +154,15 @@ class BPlusTreeLeafPage : public BPlusTreePage {
    *
    * 必须先检查 `high_key_is_valid_`.
    */
-  bool high_key_is_valid_;
-  KeyType high_key_;
+  bool highkey_valid_;
+  KeyType highkey_;
+
+  /**
+   * LowKey 机制.
+   * 指示当前 LeafPage 的 kv lowerbound. 不可变.
+   */
+  bool lowkey_valid_;
+  KeyType lowkey_;
 
   /**
    * Array members for page data.
