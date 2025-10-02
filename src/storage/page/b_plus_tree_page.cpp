@@ -98,7 +98,7 @@ auto BPlusTreePage::IsOverflowed() const -> bool { return GetSize() >= GetMaxSiz
 auto BPlusTreePage::IsOverflowedAfterMergeWith(WritePageGuard &rpage_g) const -> bool {
   int cnt_sum{GetSize() + rpage_g.As<BPlusTreePage>()->GetSize()};
   /** Ceil. */
-  return (cnt_sum + 1) / 2 > GetMaxSize();
+  return cnt_sum > GetMaxSize();
 }
 
 auto BPlusTreePage::IsUnderflowed() const -> bool { return GetSize() <= GetMinSize(); }

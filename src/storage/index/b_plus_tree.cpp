@@ -38,6 +38,8 @@ BPLUSTREE_TYPE::BPlusTree(std::string name, page_id_t header_page_id, BufferPool
 /**
  * 析构函数.
  */
+INDEX_TEMPLATE_ARGUMENTS
+BPLUSTREE_TYPE::~BPlusTree() { BUSTUB_ASSERT(qsbr_mgr_.GetRetiredCntGlobal() == 0, "Unexpected."); }
 
 /**
  * @brief Helper function to decide whether current b+tree is empty
@@ -119,7 +121,7 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
     cur_page_id = page_data->ValueAt(upperbound_idx - 1);
   }
 
-  if (qsbr_mgr_.GetRetiredCntLocal() > 32) {
+  if (qsbr_mgr_.GetRetiredCntLocal() > 0) {
     qsbr_mgr_.ReclaimLocal();
   }
   return is_found;
@@ -234,7 +236,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
   }
 
   qsbr_mgr_.ExitCriticalZone();
-  if (qsbr_mgr_.GetRetiredCntLocal() > 32) {
+  if (qsbr_mgr_.GetRetiredCntLocal() > 0) {
     qsbr_mgr_.ReclaimLocal();
   }
   return true;
@@ -311,7 +313,7 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key) {
   }
 
   qsbr_mgr_.ExitCriticalZone();
-  if (qsbr_mgr_.GetRetiredCntLocal() > 32) {
+  if (qsbr_mgr_.GetRetiredCntLocal() > 0) {
     qsbr_mgr_.ReclaimLocal();
   }
 }
