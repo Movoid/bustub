@@ -169,6 +169,8 @@ class BufferPoolManager {
   auto PinPage(page_id_t page_id) -> bool;
   auto UnpinPage(page_id_t page_id) -> bool;
 
+  void SetCallbackOnDestroyUnsafe(const std::function<void()> &func);
+
  private:
   auto FetchPageUnsafe(page_id_t page_id, frame_id_t frame_id) -> bool;
   auto FlushPageUnsafe(page_id_t page_id, frame_id_t frame_id) -> bool;
@@ -264,5 +266,10 @@ class BufferPoolManager {
    * stored inside of it. Additionally, you may also want to implement a helper function that returns either a shared
    * pointer to a `FrameHeader` that already has a page's data stored inside of it, or an index to said `FrameHeader`.
    */
+
+  /**
+   * Callback functions on destroy.
+   */
+  std::vector<std::function<void()>> callback_;
 };
 }  // namespace bustub

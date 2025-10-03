@@ -101,8 +101,15 @@ BufferPoolManager::BufferPoolManager(size_t num_frames, DiskManager *disk_manage
 
 /**
  * @brief Destroys the `BufferPoolManager`, freeing up all memory that the buffer pool was using.
+ *
+ * Support callback.
  */
-BufferPoolManager::~BufferPoolManager() = default;
+BufferPoolManager::~BufferPoolManager() {
+  while (!callback_.empty()) {
+    callback_.back()();
+    callback_.pop_back();
+  }
+}
 
 /**
  * @brief Returns the number of frames that this buffer pool manages.
@@ -697,5 +704,7 @@ auto BufferPoolManager::UnpinPage(page_id_t page_id) -> bool {
   }
   return true;
 }
+
+void BufferPoolManager::SetCallbackOnDestroyUnsafe(const std::function<void()> &func) { callback_.emplace_back(func); }
 
 }  // namespace bustub
