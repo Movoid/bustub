@@ -153,7 +153,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
   PathContainer backfix_path{};
   IndexKvPack backfix_kv{std::nullopt};
 
-  // Phase 1.
+  // Locate.
   {
     ReadPageGuard page_g{bpm_->ReadPage(cur_root_id)};
     auto page_header_data{page_g.As<BPlusTreePage>()};
@@ -170,20 +170,59 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
       page_header_data = page_g.As<BPlusTreePage>();
     }
 
-    WritePageGuard page_g_w{GoSibUntilCoverRW(std::move(page_g), key)};
-    // Split leaf?
-    TrySplit(page_g_w, backfix_kv);
-    GoSibUntilCoverWW(page_g_w, key);
-    auto page_data{page_g_w.AsMut<LeafPage>()};
-    /**
-     * 由于乐观机制, 可能在 Go 之后 Overflow.
-     * 这必须重构为, 先 backfix, 再真正 Insert.
-     */
+    WritePageGuard leaf_g_w{GoSibUntilCoverRW(std::move(page_g), key)};
+    page_id_t last_leaf_id{leaf_g_w.GetPageId()};
+    // Split?
+    while (TrySplit(leaf_g_w, backfix_kv)) {
+      leaf_g_w.Drop();  // Drop here.
+
+      // Backfix.
+      PathContainer cur_backfix_path{backfix_path};
+
+      int next_level{2};
+      while (backfix_kv.has_value()) {
+        auto &[backfix_key, backfix_val]{backfix_kv.value()};
+        if (cur_backfix_path.Empty()) {
+          if (TryNewRoot(cur_root_id, next_level)) {
+            cur_backfix_path.EmplaceBack(cur_root_id);
+            continue;
+          }
+          cur_backfix_path.Clear();
+          GetPathTo(next_level, backfix_key, cur_backfix_path);
+          if (cur_backfix_path.Empty()) {
+            // As protocol, task is cancelled with `DONT_LINK`.
+            break;
+          }
+          cur_root_id = cur_backfix_path.Front();
+          continue;
+        }
+        {
+          WritePageGuard page_g_w{bpm_->WritePage(cur_backfix_path.Back())};
+          GoSibUntilCoverWW(page_g_w, key);
+          auto page_header_data{page_g_w.As<BPlusTreePage>()};
+          BUSTUB_ASSERT(!page_header_data->IsLeafPage(), "Unexpected.");
+          BUSTUB_ASSERT(page_header_data->GetLevel() == next_level, "Unexpected.");
+          auto page_data{page_g_w.AsMut<InternalPage>()};
+          if (!page_data->CoveredKey(backfix_key, comparator_)) {
+            // As protocol, this is level is deleted.
+            // The backfix task should be `DONT_LINK`.
+            break;
+          }
+          BackfixInsertKv(page_g_w, backfix_kv);
+        }
+        next_level++;
+        cur_backfix_path.PopBack();
+      }
+      leaf_g_w = bpm_->WritePage(last_leaf_id);  // Go back to leaf.
+      GoSibUntilCoverWW(leaf_g_w, key);
+      last_leaf_id = leaf_g_w.GetPageId();  // Record.
+    }
+    auto page_data{leaf_g_w.AsMut<LeafPage>()};
     BUSTUB_ASSERT(!page_data->IsOverflowed(), "Unexpected.");
-    // Do some **REAL** modifications.
+    // Insert.
     int upperbound_idx{page_data->FindIndexUpperbound(key, comparator_)};
 
-    // This leaf may have 0 kv.
+    // This leaf may have no kv.
     BUSTUB_ASSERT(!page_data->HasValidLowKey() || comparator_(page_data->GetLowKey(), key) <= 0, "Invariant broken.");
     BUSTUB_ASSERT(upperbound_idx > 0 || page_data->GetSize() == 0 || comparator_(key, page_data->KeyAt(0)) < 0,
                   "Invariant broken.");
@@ -194,51 +233,6 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
     }
     page_data->NewKvAt(upperbound_idx);
     page_data->ModifyKvAt(upperbound_idx, key, value);
-  }
-
-  // Phase 2.
-  // Insert `backfix_key` to parent.
-  {
-    int next_level{2};
-    while (backfix_kv.has_value()) {
-      auto &[backfix_key, backfix_val]{backfix_kv.value()};
-      if (backfix_path.Empty()) {
-        if (TryNewRoot(cur_root_id, next_level)) {
-          backfix_path.EmplaceBack(cur_root_id);
-          continue;
-        }
-        backfix_path.Clear();
-        GetPathTo(next_level, backfix_key, backfix_path);
-        if (backfix_path.Empty()) {
-          // Task is cancelled with `DONT_LINK` ?
-          break;
-        }
-        cur_root_id = backfix_path.Front();
-        continue;
-      }
-      {
-        WritePageGuard page_g_w{bpm_->WritePage(backfix_path.Back())};
-        GoSibUntilCoverWW(page_g_w, key);
-        auto page_header_data{page_g_w.As<BPlusTreePage>()};
-        BUSTUB_ASSERT(!page_header_data->IsLeafPage(), "Unexpected.");
-        BUSTUB_ASSERT(page_header_data->GetLevel() == next_level, "Unexpected.");
-        auto page_data{page_g_w.AsMut<InternalPage>()};
-        if (!page_data->CoveredKey(backfix_key, comparator_)) {
-          // As protocol, this is level is deleted.
-          // The backfix task should be `DONT_LINK`.
-          // {
-          //   ReadPageGuard check_page_g{bpm_->ReadPage(backfix_val)};
-          //   auto check_page_header_data{check_page_g.As<BPlusTreePage>()};
-          //   BUSTUB_ASSERT(check_page_header_data->GetBackfixStatus() == BackfixStatus::DONT_LINK_IN_PARENT,
-          //                 "Protocol error.");
-          // }
-          break;
-        }
-        BackfixInsertKv(page_g_w, backfix_kv);
-      }
-      next_level++;
-      backfix_path.PopBack();
-    }
   }
 
   qsbr_mgr_.ExitCriticalZone();
@@ -293,6 +287,7 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key) {
       return;
     }
     page_data->DeleteKvAt(lowerbound_idx);
+    // Merge one time is enough.
     TryMerge(page_g_w, backfix_kv, backfix_parent_id);
     try_delete_root_hint =
         page_data->GetSize() == 0 && !page_data->HasValidLowKey() && page_data->GetNextPageId() == INVALID_PAGE_ID;
