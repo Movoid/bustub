@@ -264,14 +264,15 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key) {
     return;
   }
 
+  PathContainer backfix_path{};
   IndexKvPack backfix_kv{std::nullopt};
-  page_id_t backfix_parent_id{INVALID_PAGE_ID};
   bool try_delete_root_hint{};
 
   {
     ReadPageGuard page_g{bpm_->ReadPage(cur_root_id)};
     while (!page_g.As<BPlusTreePage>()->IsLeafPage()) {
       GoSibUntilCoverRR(page_g, key);
+      backfix_path.EmplaceBack(page_g.GetPageId());
       auto page_data{page_g.As<InternalPage>()};
       int upperbound_idx{page_data->FindIndexUpperbound(key, comparator_)};
       BUSTUB_ASSERT(upperbound_idx > 0, "Invariant broken.");
@@ -288,26 +289,46 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key) {
     }
     page_data->DeleteKvAt(lowerbound_idx);
     // Merge one time is enough.
-    TryMerge(page_g_w, backfix_kv, backfix_parent_id);
+    TryMerge(page_g_w, backfix_kv);
     try_delete_root_hint =
         page_data->GetSize() == 0 && !page_data->HasValidLowKey() && page_data->GetNextPageId() == INVALID_PAGE_ID;
   }
 
   {
+    // while (backfix_kv.has_value()) {
+    //   BUSTUB_ASSERT(backfix_parent_id != INVALID_PAGE_ID, "Protocol error.");
+    //   auto &[backfix_key, backfix_val]{backfix_kv.value()};
+    //   cur_root_id = backfix_parent_id;
+    //   {
+    //     WritePageGuard page_g{bpm_->WritePage(backfix_parent_id)};
+    //     GoSibUntilCoverWW(page_g, backfix_key);
+    //     BUSTUB_ASSERT(!page_g.As<BPlusTreePage>()->IsLeafPage(), "Unexpected.");
+    //     auto page_data{page_g.AsMut<InternalPage>()};
+    //     BUSTUB_ASSERT(page_data->CoveredKey(backfix_key, comparator_), "Unexpected.");
+    //     BackfixRemoveKv(page_g, backfix_kv, backfix_parent_id);
+    //     try_delete_root_hint =
+    //         page_data->GetSize() == 0 && !page_data->HasValidLowKey() && page_data->GetNextPageId() ==
+    //         INVALID_PAGE_ID;
+    //   }
+    // }
+    int next_level{2};
     while (backfix_kv.has_value()) {
-      BUSTUB_ASSERT(backfix_parent_id != INVALID_PAGE_ID, "Protocol error.");
       auto &[backfix_key, backfix_val]{backfix_kv.value()};
-      cur_root_id = backfix_parent_id;
+      if (backfix_path.Empty()) {
+        GetPathTo(next_level, backfix_key, backfix_path);
+        BUSTUB_ASSERT(!backfix_path.Empty(), "Unexpected.");
+      }
       {
-        WritePageGuard page_g{bpm_->WritePage(backfix_parent_id)};
-        GoSibUntilCoverWW(page_g, backfix_key);
+        WritePageGuard page_g{bpm_->WritePage(backfix_path.Back())};
         BUSTUB_ASSERT(!page_g.As<BPlusTreePage>()->IsLeafPage(), "Unexpected.");
-        auto page_data{page_g.AsMut<InternalPage>()};
-        BUSTUB_ASSERT(page_data->CoveredKey(backfix_key, comparator_), "Unexpected.");
-        BackfixRemoveKv(page_g, backfix_kv, backfix_parent_id);
+        GoSibUntilCoverWW(page_g, backfix_key);
+        BUSTUB_ASSERT(page_g.As<InternalPage>()->CoveredKey(backfix_key, comparator_), "Unexpected.");
+        BackfixRemoveKv(page_g, backfix_kv);
+        auto page_data{page_g.As<InternalPage>()};
         try_delete_root_hint =
             page_data->GetSize() == 0 && !page_data->HasValidLowKey() && page_data->GetNextPageId() == INVALID_PAGE_ID;
       }
+      backfix_path.PopBack();
     }
   }
 
@@ -420,6 +441,9 @@ auto BPLUSTREE_TYPE::GoSibUntilCoverRR(ReadPageGuard &page_g, const KeyType &key
     while (!page_g.As<LeafPage>()->CoveredKey(key, comparator_)) {
       auto page_data{page_g.As<LeafPage>()};
       page_id_t next_page_id{page_data->GetNextPageId()};
+      if (next_page_id == INVALID_PAGE_ID) {
+        break;
+      }
       page_g.Drop();
       page_g = bpm_->ReadPage(next_page_id);
       ret = true;
@@ -428,6 +452,9 @@ auto BPLUSTREE_TYPE::GoSibUntilCoverRR(ReadPageGuard &page_g, const KeyType &key
     while (!page_g.As<InternalPage>()->CoveredKey(key, comparator_)) {
       auto page_data{page_g.As<InternalPage>()};
       page_id_t next_page_id{page_data->GetNextPageId()};
+      if (next_page_id == INVALID_PAGE_ID) {
+        break;
+      }
       page_g.Drop();
       page_g = bpm_->ReadPage(next_page_id);
       ret = true;
@@ -443,6 +470,9 @@ auto BPLUSTREE_TYPE::GoSibUntilCoverWW(WritePageGuard &page_g, const KeyType &ke
     while (!page_g.As<LeafPage>()->CoveredKey(key, comparator_)) {
       auto page_data{page_g.As<LeafPage>()};
       page_id_t next_page_id{page_data->GetNextPageId()};
+      if (next_page_id == INVALID_PAGE_ID) {
+        break;
+      }
       page_g.Drop();
       page_g = bpm_->WritePage(next_page_id);
       ret = true;
@@ -451,6 +481,9 @@ auto BPLUSTREE_TYPE::GoSibUntilCoverWW(WritePageGuard &page_g, const KeyType &ke
     while (!page_g.As<InternalPage>()->CoveredKey(key, comparator_)) {
       auto page_data{page_g.As<InternalPage>()};
       page_id_t next_page_id{page_data->GetNextPageId()};
+      if (next_page_id == INVALID_PAGE_ID) {
+        break;
+      }
       page_g.Drop();
       page_g = bpm_->WritePage(next_page_id);
       ret = true;
@@ -465,6 +498,9 @@ auto BPLUSTREE_TYPE::GoSibUntilCoverRW(ReadPageGuard &&page_g, const KeyType &ke
     while (!page_g.As<LeafPage>()->CoveredKey(key, comparator_)) {
       auto page_data{page_g.As<LeafPage>()};
       page_id_t next_page_id{page_data->GetNextPageId()};
+      if (next_page_id == INVALID_PAGE_ID) {
+        break;
+      }
       page_g.Drop();
       page_g = bpm_->ReadPage(next_page_id);
     }
@@ -472,6 +508,9 @@ auto BPLUSTREE_TYPE::GoSibUntilCoverRW(ReadPageGuard &&page_g, const KeyType &ke
     while (!page_g.As<InternalPage>()->CoveredKey(key, comparator_)) {
       auto page_data{page_g.As<InternalPage>()};
       page_id_t next_page_id{page_data->GetNextPageId()};
+      if (next_page_id == INVALID_PAGE_ID) {
+        break;
+      }
       page_g.Drop();
       page_g = bpm_->ReadPage(next_page_id);
     }
@@ -485,6 +524,9 @@ auto BPLUSTREE_TYPE::GoSibUntilCoverRW(ReadPageGuard &&page_g, const KeyType &ke
     while (!page_g_w.As<LeafPage>()->CoveredKey(key, comparator_)) {
       auto page_data{page_g_w.As<LeafPage>()};
       page_id_t next_page_id{page_data->GetNextPageId()};
+      if (next_page_id == INVALID_PAGE_ID) {
+        break;
+      }
       page_g_w.Drop();
       page_g_w = bpm_->WritePage(next_page_id);
     }
@@ -492,6 +534,9 @@ auto BPLUSTREE_TYPE::GoSibUntilCoverRW(ReadPageGuard &&page_g, const KeyType &ke
     while (!page_g_w.As<InternalPage>()->CoveredKey(key, comparator_)) {
       auto page_data{page_g_w.As<InternalPage>()};
       page_id_t next_page_id{page_data->GetNextPageId()};
+      if (next_page_id == INVALID_PAGE_ID) {
+        break;
+      }
       page_g_w.Drop();
       page_g_w = bpm_->WritePage(next_page_id);
     }
@@ -607,11 +652,10 @@ auto BPLUSTREE_TYPE::TrySplit(WritePageGuard &page_g, IndexKvPack &backfix_kv) -
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::TryMerge(WritePageGuard &page_g, IndexKvPack &backfix_kv, page_id_t &parent_id) -> bool {
+auto BPLUSTREE_TYPE::TryMerge(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool {
   auto page_header_data{page_g.As<BPlusTreePage>()};
   if (!page_header_data->IsUnderflowed()) {
     backfix_kv = std::nullopt;
-    parent_id = INVALID_PAGE_ID;
     return false;
   }
 
@@ -620,14 +664,12 @@ auto BPLUSTREE_TYPE::TryMerge(WritePageGuard &page_g, IndexKvPack &backfix_kv, p
     // There is no sibling.
     if (page_data->GetNextPageId() == INVALID_PAGE_ID) {
       backfix_kv = std::nullopt;
-      parent_id = INVALID_PAGE_ID;
       return false;
     }
     WritePageGuard sib_g_w{bpm_->WritePage(page_data->GetNextPageId())};
     // Can't merge.
     if (page_header_data->IsOverflowedAfterMergeWith(sib_g_w)) {
       backfix_kv = std::nullopt;
-      parent_id = INVALID_PAGE_ID;
       return false;
     }
 
@@ -645,23 +687,19 @@ auto BPLUSTREE_TYPE::TryMerge(WritePageGuard &page_g, IndexKvPack &backfix_kv, p
     if (sib_data->GetBackfixStatus() == BackfixStatus::NOT_LINKED_IN_PARENT) {
       sib_data->SetBackfixStatus(BackfixStatus::DONT_LINK_IN_PARENT);
       backfix_kv = std::nullopt;
-      parent_id = INVALID_PAGE_ID;
       return false;
     }
 
     BUSTUB_ASSERT(sib_data->GetBackfixStatus() == BackfixStatus::IS_LINKED_IN_PARENT, "Protocol error.");
-    parent_id = sib_data->GetLinkedParentId();
   } else {
     auto page_data{page_g.AsMut<InternalPage>()};
     if (page_data->GetNextPageId() == INVALID_PAGE_ID) {
       backfix_kv = std::nullopt;
-      parent_id = INVALID_PAGE_ID;
       return false;
     }
     WritePageGuard sib_g_w{bpm_->WritePage(page_data->GetNextPageId())};
     if (page_header_data->IsOverflowedAfterMergeWith(sib_g_w)) {
       backfix_kv = std::nullopt;
-      parent_id = INVALID_PAGE_ID;
       return false;
     }
 
@@ -678,12 +716,10 @@ auto BPLUSTREE_TYPE::TryMerge(WritePageGuard &page_g, IndexKvPack &backfix_kv, p
     if (sib_data->GetBackfixStatus() == BackfixStatus::NOT_LINKED_IN_PARENT) {
       sib_data->SetBackfixStatus(BackfixStatus::DONT_LINK_IN_PARENT);
       backfix_kv = std::nullopt;
-      parent_id = INVALID_PAGE_ID;
       return false;
     }
 
     BUSTUB_ASSERT(sib_data->GetBackfixStatus() == BackfixStatus::IS_LINKED_IN_PARENT, "Protocol error.");
-    parent_id = sib_data->GetLinkedParentId();
   }
   return true;
 }
@@ -839,7 +875,6 @@ auto BPLUSTREE_TYPE::BackfixInsertKv(WritePageGuard &page_g, IndexKvPack &backfi
   page_data->NewKvAt(upperbound_idx);
   page_data->ModifyKvAt(upperbound_idx, cur_key, cur_val);
   check_page_header_data->SetBackfixStatus(BackfixStatus::IS_LINKED_IN_PARENT);
-  check_page_header_data->SetLinkedParentId(page_g.GetPageId());
   backfix_kv = std::move(new_backfix_kv);
   return ret;
 }
@@ -848,7 +883,7 @@ auto BPLUSTREE_TYPE::BackfixInsertKv(WritePageGuard &page_g, IndexKvPack &backfi
  * Todo.
  */
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::BackfixRemoveKv(WritePageGuard &page_g, IndexKvPack &backfix_kv, page_id_t &parent_id) -> bool {
+auto BPLUSTREE_TYPE::BackfixRemoveKv(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool {
   auto &[backfix_key, backfix_val]{backfix_kv.value()};
   GoSibUntilCoverWW(page_g, backfix_key);
   BUSTUB_ASSERT(!page_g.As<BPlusTreePage>()->IsLeafPage(), "Invalid args.");
@@ -866,7 +901,7 @@ auto BPLUSTREE_TYPE::BackfixRemoveKv(WritePageGuard &page_g, IndexKvPack &backfi
   BUSTUB_ASSERT(check_idx < page_data->GetSize(), "Protocol error.");
 
   page_data->DeleteKvAt(check_idx);
-  TryMerge(page_g, backfix_kv, parent_id);
+  TryMerge(page_g, backfix_kv);
   return true;
 }
 

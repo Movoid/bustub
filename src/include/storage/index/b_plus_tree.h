@@ -1287,7 +1287,7 @@ class BPlusTree {
   void GetPathTo(int level, const KeyType &key, PathContainer &path);
 
   auto TrySplit(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool;
-  auto TryMerge(WritePageGuard &page_g, IndexKvPack &backfix_kv, page_id_t &parent_id) -> bool;
+  auto TryMerge(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool;
 
   /**
    * 这两个应该由 TrySplit/TryMerge 调用.
@@ -1302,7 +1302,7 @@ class BPlusTree {
 
   auto BackfixInsertKv(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool;
 
-  auto BackfixRemoveKv(WritePageGuard &page_g, IndexKvPack &backfix_kv, page_id_t &parent_id) -> bool;
+  auto BackfixRemoveKv(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool;
 
  private:
   void ToGraph(page_id_t page_id, const BPlusTreePage *page, std::ofstream &out);

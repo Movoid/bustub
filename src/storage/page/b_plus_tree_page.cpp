@@ -82,16 +82,6 @@ void BPlusTreePage::SetBackfixStatus(BackfixStatus status) {
   backfix_status_ = status;
 }
 
-auto BPlusTreePage::GetLinkedParentId() const -> page_id_t {
-  BUSTUB_ASSERT(backfix_status_ == BackfixStatus::IS_LINKED_IN_PARENT, "Protocol error.");
-  return linked_parent_id_;
-}
-
-void BPlusTreePage::SetLinkedParentId(page_id_t parent_id) {
-  BUSTUB_ASSERT(GetBackfixStatus() == BackfixStatus::IS_LINKED_IN_PARENT, "Protocol error.");
-  linked_parent_id_ = parent_id;
-}
-
 auto BPlusTreePage::IsOverflowed() const -> bool { return GetSize() >= GetMaxSize(); }
 
 /** 无法通过均分解决 Overflow. */

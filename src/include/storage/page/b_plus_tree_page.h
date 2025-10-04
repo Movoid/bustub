@@ -93,8 +93,6 @@ class BPlusTreePage {
 
   auto GetBackfixStatus() const -> BackfixStatus;
   void SetBackfixStatus(BackfixStatus status);
-  auto GetLinkedParentId() const -> page_id_t;
-  void SetLinkedParentId(page_id_t parent_id);
 
   /**
    * 只有在 `Is{Over, Under}flowedWith` 返回 `false` 时,
@@ -141,7 +139,6 @@ class BPlusTreePage {
    * 用于 backfix remove kv 向上回溯.
    */
   BackfixStatus backfix_status_;
-  page_id_t linked_parent_id_;
 
   /**
    * BPlusTreePage 不需要额外的锁,
