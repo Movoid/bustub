@@ -284,7 +284,7 @@ class QSBRManager : private utils::EBODeleterStorage<DeleterType> {
       this->ReclaimLocal();
       {
         std::unique_lock<std::shared_mutex> register_lk{register_mtx_};
-        if (this->active_thread_cnt_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+        if (this->active_thread_cnt_.fetch_sub(1, std::memory_order_acq_rel) <= 2) {
           this->ReclaimGlobalUnsafe();
         }
       }
@@ -417,7 +417,10 @@ class QSBRManager : private utils::EBODeleterStorage<DeleterType> {
     }
     QSBRContext_ *ctx{context.value().local_qsbr_ctx_};
     RetiredContext_ &retired_ctx{ctx->second};
-    retired_ctx.Retire(std::move(val), SnapshotCriticalEpochs());
+    {
+      std::shared_lock<std::shared_mutex> register_lk{register_mtx_};
+      retired_ctx.Retire(std::move(val), SnapshotCriticalEpochs());
+    }
   }
 
   void ReclaimLocal() {
@@ -427,7 +430,10 @@ class QSBRManager : private utils::EBODeleterStorage<DeleterType> {
     }
     QSBRContext_ *ctx{context.value().local_qsbr_ctx_};
     RetiredContext_ &retired_ctx{ctx->second};
-    retired_ctx.Reclaim(SnapshotFullEpochs(), this->GetDeleter());
+    {
+      std::shared_lock<std::shared_mutex> register_lk{register_mtx_};
+      retired_ctx.Reclaim(SnapshotFullEpochs(), this->GetDeleter());
+    }
   }
 
   /**
