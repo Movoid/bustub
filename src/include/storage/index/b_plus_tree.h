@@ -23,22 +23,40 @@
 
 // ============================================================
 
+#pragma once
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <cstring>
+#include <deque>
+#include <filesystem>
+#include <functional>
+#include <iostream>
+#include <iterator>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <queue>
+#include <shared_mutex>
+#include <string>
+#include <type_traits>
+#include <unordered_map>
+#include <vector>
+
+#include "common/config.h"
 #include "common/macros.h"
+#include "storage/index/index_iterator.h"
+#include "storage/page/b_plus_tree_header_page.h"
+#include "storage/page/b_plus_tree_internal_page.h"
+#include "storage/page/b_plus_tree_leaf_page.h"
+#include "storage/page/page_guard.h"
 
 // ============================================================
 //
 // SimpleCU_QSBR.h
 //
 // ============================================================
-#pragma once
-#include <atomic>
-#include <functional>
-#include <memory>
-#include <mutex>
-#include <optional>
-#include <shared_mutex>
-#include <unordered_map>
-#include <vector>
 
 namespace simple_cu::utils {
 
@@ -62,9 +80,9 @@ struct alignas(ALIGNMENT) Aligned<ValType, std::enable_if_t<std::is_class_v<ValT
 
 template <typename ValType>
 struct alignas(ALIGNMENT) Aligned<ValType, std::enable_if_t<!std::is_class_v<ValType>>> {
-  ValType val_;
+  ValType val_{};
 
-  Aligned() : val_{} {}
+  Aligned() = default;
   template <typename ValType_, typename Requires_ = std::enable_if_t<std::is_constructible_v<ValType, ValType_>>>
   explicit Aligned(ValType_ &&that) : ValType(std::forward<ValType_>(that)) {}
   auto operator=(const ValType &v) -> Aligned & {
@@ -88,9 +106,9 @@ class EBODeleterStorage {
   explicit EBODeleterStorage(const DeleterType &deleter) : deleter_{deleter} {  // 使用一个 DeleterType 对象构造
   }
   EBODeleterStorage(const EBODeleterStorage &) = default;
-  EBODeleterStorage(EBODeleterStorage &&) = default;
+  EBODeleterStorage(EBODeleterStorage &&) noexcept = default;
   auto operator=(const EBODeleterStorage &) -> EBODeleterStorage & = default;
-  auto operator=(EBODeleterStorage &&) -> EBODeleterStorage & = default;
+  auto operator=(EBODeleterStorage &&) noexcept -> EBODeleterStorage & = default;
   ~EBODeleterStorage() = default;
 
   auto GetDeleter() -> DeleterType & { return deleter_; }
@@ -104,9 +122,9 @@ class EBODeleterStorage<DeleterType, std::enable_if_t<std::is_empty_v<DeleterTyp
       : DeleterType{deleter} {  // 也允许使用一个已经构造了的空 DeleterType.
   }
   EBODeleterStorage(const EBODeleterStorage &) = default;
-  EBODeleterStorage(EBODeleterStorage &&) = default;
+  EBODeleterStorage(EBODeleterStorage &&) noexcept = default;
   auto operator=(const EBODeleterStorage &) -> EBODeleterStorage & = default;
-  auto operator=(EBODeleterStorage &&) -> EBODeleterStorage & = default;
+  auto operator=(EBODeleterStorage &&) noexcept -> EBODeleterStorage & = default;
   ~EBODeleterStorage() = default;
 
   auto GetDeleter() -> DeleterType & { return *this; }
@@ -493,13 +511,6 @@ class QSBRGuard {
 // SmallVector.h
 //
 // ============================================================
-
-#pragma once
-#include <cstdint>
-#include <cstring>
-#include <iterator>
-#include <limits>
-#include <type_traits>
 
 namespace meow_utils {
 /**
@@ -1115,26 +1126,6 @@ class SmallVector {
   }
 };
 }  // namespace meow_utils
-
-#pragma once
-
-#include <algorithm>
-#include <deque>
-#include <filesystem>
-#include <iostream>
-#include <optional>
-#include <queue>
-#include <shared_mutex>
-#include <string>
-#include <vector>
-
-#include "common/config.h"
-#include "common/macros.h"
-#include "storage/index/index_iterator.h"
-#include "storage/page/b_plus_tree_header_page.h"
-#include "storage/page/b_plus_tree_internal_page.h"
-#include "storage/page/b_plus_tree_leaf_page.h"
-#include "storage/page/page_guard.h"
 
 namespace bustub {
 

@@ -163,7 +163,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
       backfix_path.EmplaceBack(page_g.GetPageId());
       auto page_data{page_g.As<InternalPage>()};
       int upperbound_idx{page_data->FindIndexUpperbound(key, comparator_)};
-      BUSTUB_ASSERT(upperbound_idx > 0, "Invariant broken.");
+      BUSTUB_ASSERT(upperbound_idx >= 0, "Invariant broken.");
       page_id_t next_id{page_data->ValueAt(upperbound_idx - 1)};
       page_g.Drop();
       page_g = bpm_->ReadPage(next_id);
@@ -175,6 +175,10 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
     TrySplit(page_g_w, backfix_kv);
     GoSibUntilCoverWW(page_g_w, key);
     auto page_data{page_g_w.AsMut<LeafPage>()};
+    /**
+     * 由于乐观机制, 可能在 Go 之后 Overflow.
+     * 这必须重构为, 先 backfix, 再真正 Insert.
+     */
     BUSTUB_ASSERT(!page_data->IsOverflowed(), "Unexpected.");
     // Do some **REAL** modifications.
     int upperbound_idx{page_data->FindIndexUpperbound(key, comparator_)};
@@ -584,6 +588,7 @@ auto BPLUSTREE_TYPE::TrySplit(WritePageGuard &page_g, IndexKvPack &backfix_kv) -
     WritePageGuard new_sib_g_w{bpm_->WritePage(bpm_->NewPage())};
     auto new_sib_data{new_sib_g_w.AsMut<LeafPage>()};
     new_sib_data->Init();
+    new_sib_data->SetMaxSize(page_data->GetMaxSize());
     int kv_sum{page_data->GetSize() + new_sib_data->GetSize()};
     page_data->RedistributeWithRight(new_sib_g_w, (kv_sum + 1) / 2, kv_sum / 2);
     new_sib_data->SetNextPageId(page_data->GetNextPageId());
@@ -595,6 +600,7 @@ auto BPLUSTREE_TYPE::TrySplit(WritePageGuard &page_g, IndexKvPack &backfix_kv) -
     WritePageGuard new_sib_g_w{bpm_->WritePage(bpm_->NewPage())};
     auto new_sib_data{new_sib_g_w.AsMut<InternalPage>()};
     new_sib_data->Init();
+    new_sib_data->SetMaxSize(page_data->GetMaxSize());
     int kv_sum{page_data->GetSize() + new_sib_data->GetSize()};
     page_data->RedistributeWithRight(new_sib_g_w, (kv_sum + 1) / 2, kv_sum / 2);
     new_sib_data->SetNextPageId(page_data->GetNextPageId());
