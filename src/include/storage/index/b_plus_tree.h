@@ -1395,5 +1395,21 @@ struct PrintableBPlusTree {
   必须给 Leaf Node 添加一个持久的 lowkey, 类似 Internal Node.
   以及, 从左向右的 Merge 永远不被允许, 这会破坏 Sibling 的 lowkey.
   同理, 从右向左的 Split 也不被允许, 同样破坏当前节点的 lowkey.
-  - Statue: In progress.
+  - Statue: Solved. 对 Leaf 节点引入 lowkey 机制.
+
+  问题日志.
+  在当前的 LINK Protocol 中, `linked_parent_id_` 带来了问题.
+  若 page x 的 `linked_parent_id_` page 中的 kv 被删除,
+  而导致此 parent page 被 Merge 而 QSBR Retire,
+  此时 ReclaimLocal 回收这个 parent page 是合理的,
+  因为对 page x 的 `Remove` 可能还未启动, 没有进入 QSBR 临界区.
+
+  这疑似是当前 QSBR 算法的错误, 严格按照 Quetient State,
+  `Remove` 未启动, Epoch 没有变化, 则 ReclaimLocal 不应该回收.
+
+  分析后结论, 并不是 QSBR 算法问题,
+  而是 LINK Protocol 的 parent id 生命周期脱离了控制.
+  必须废除 `linked_parent_id_` 机制, 采取类似 `Insert` 的 path 机制.
+  - Status: In progress.
+
 */
