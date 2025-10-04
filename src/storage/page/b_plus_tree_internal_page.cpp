@@ -258,7 +258,7 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage
       SetHighKey(std::nullopt);
     }
     rpage->SetLowKey(std::nullopt);
-    rpage->SetHighKey(GetLowKey());
+    rpage->SetHighKey(KeyType{});
   } else {  // Split
     if (HasValidHighKey()) {
       rpage->SetHighKey(GetHighKey());

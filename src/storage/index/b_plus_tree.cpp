@@ -11,7 +11,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "storage/index/b_plus_tree.h"
-#include <memory_resource>
 #include "storage/index/b_plus_tree_debug.h"
 
 namespace bustub {
@@ -100,7 +99,6 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
     GoSibUntilCoverRR(page_g, key);
 
     if (page_g.As<BPlusTreePage>()->IsLeafPage()) {
-      qsbr_mgr_.ExitCriticalZone();
       // page_g = GoSibUntilCoverRR(key, std::move(page_g));
       // 目标 kv 最多只会出现在一个节点, 沿着 SibLink walk 到 Covered 节点即可.
       auto page_data{page_g.As<LeafPage>()};
@@ -117,10 +115,11 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
     // Is internal node.
     auto page_data{page_g.As<InternalPage>()};
     int upperbound_idx{page_data->FindIndexUpperbound(key, comparator_)};
-    // BUSTUB_ASSERT(upperbound_idx > 0, "All keys in this node are above `key`? Invariant broken.");
+    BUSTUB_ASSERT(upperbound_idx > 0, "Invariant broken.");
     cur_page_id = page_data->ValueAt(upperbound_idx - 1);
   }
 
+  qsbr_mgr_.ExitCriticalZone();
   if (qsbr_mgr_.GetRetiredCntLocal() > 0) {
     qsbr_mgr_.ReclaimLocal();
   }
@@ -165,7 +164,9 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
       auto page_data{page_g.As<InternalPage>()};
       int upperbound_idx{page_data->FindIndexUpperbound(key, comparator_)};
       BUSTUB_ASSERT(upperbound_idx > 0, "Invariant broken.");
-      page_g = bpm_->ReadPage(page_data->ValueAt(upperbound_idx - 1));
+      page_id_t next_id{page_data->ValueAt(upperbound_idx - 1)};
+      page_g.Drop();
+      page_g = bpm_->ReadPage(next_id);
       page_header_data = page_g.As<BPlusTreePage>();
     }
 
@@ -178,11 +179,13 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
     // Do some **REAL** modifications.
     int upperbound_idx{page_data->FindIndexUpperbound(key, comparator_)};
 
-    BUSTUB_ASSERT(upperbound_idx > 0 || !page_data->HasValidLowKey() ||
-                      comparator_(page_data->GetLowKey(), page_data->KeyAt(0)) < 0,
+    // This leaf may have 0 kv.
+    BUSTUB_ASSERT(!page_data->HasValidLowKey() || comparator_(page_data->GetLowKey(), key) <= 0, "Invariant broken.");
+    BUSTUB_ASSERT(upperbound_idx > 0 || page_data->GetSize() == 0 || comparator_(key, page_data->KeyAt(0)) < 0,
                   "Invariant broken.");
 
     if (upperbound_idx > 0 && comparator_(page_data->KeyAt(upperbound_idx - 1), key) == 0) {
+      qsbr_mgr_.ExitCriticalZone();
       return false;
     }
     page_data->NewKvAt(upperbound_idx);
@@ -204,7 +207,6 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
         GetPathTo(next_level, backfix_key, backfix_path);
         if (backfix_path.Empty()) {
           // Task is cancelled with `DONT_LINK` ?
-
           break;
         }
         cur_root_id = backfix_path.Front();
@@ -220,12 +222,12 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
         if (!page_data->CoveredKey(backfix_key, comparator_)) {
           // As protocol, this is level is deleted.
           // The backfix task should be `DONT_LINK`.
-          {
-            ReadPageGuard check_page_g{bpm_->ReadPage(backfix_val)};
-            auto check_page_header_data{check_page_g.As<BPlusTreePage>()};
-            BUSTUB_ASSERT(check_page_header_data->GetBackfixStatus() == BackfixStatus::DONT_LINK_IN_PARENT,
-                          "Protocol error.");
-          }
+          // {
+          //   ReadPageGuard check_page_g{bpm_->ReadPage(backfix_val)};
+          //   auto check_page_header_data{check_page_g.As<BPlusTreePage>()};
+          //   BUSTUB_ASSERT(check_page_header_data->GetBackfixStatus() == BackfixStatus::DONT_LINK_IN_PARENT,
+          //                 "Protocol error.");
+          // }
           break;
         }
         BackfixInsertKv(page_g_w, backfix_kv);
@@ -260,6 +262,7 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key) {
   page_id_t cur_root_id{GetRootPageId()};
 
   if (cur_root_id == INVALID_PAGE_ID) {
+    qsbr_mgr_.ExitCriticalZone();
     return;
   }
 
@@ -274,12 +277,15 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key) {
       auto page_data{page_g.As<InternalPage>()};
       int upperbound_idx{page_data->FindIndexUpperbound(key, comparator_)};
       BUSTUB_ASSERT(upperbound_idx > 0, "Invariant broken.");
-      page_g = bpm_->ReadPage(page_data->ValueAt(upperbound_idx - 1));
+      page_id_t next_id{page_data->ValueAt(upperbound_idx - 1)};
+      page_g.Drop();
+      page_g = bpm_->ReadPage(next_id);
     }
     WritePageGuard page_g_w{GoSibUntilCoverRW(std::move(page_g), key)};
     auto page_data{page_g_w.AsMut<LeafPage>()};
     int lowerbound_idx{page_data->FindIndexLowerbound(key, comparator_)};
     if (lowerbound_idx == page_data->GetSize() || comparator_(page_data->KeyAt(lowerbound_idx), key) != 0) {
+      qsbr_mgr_.ExitCriticalZone();
       return;
     }
     page_data->DeleteKvAt(lowerbound_idx);
@@ -338,7 +344,9 @@ auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE {
   ReadPageGuard page_g{bpm_->ReadPage(cur_root_id)};
   while (!page_g.As<BPlusTreePage>()->IsLeafPage()) {
     auto page_data{page_g.As<InternalPage>()};
-    page_g = bpm_->ReadPage(page_data->ValueAt(0));
+    page_id_t next_id{page_data->ValueAt(0)};
+    page_g.Drop();
+    page_g = bpm_->ReadPage(next_id);
   }
   BUSTUB_ASSERT(page_g.As<BPlusTreePage>()->IsLeafPage(), "Unexpected.");
   auto page_data{page_g.As<LeafPage>()};
@@ -366,7 +374,9 @@ auto BPLUSTREE_TYPE::Begin(const KeyType &key) -> INDEXITERATOR_TYPE {
     auto page_data{page_g.As<InternalPage>()};
     int upperbound_idx{page_data->FindIndexUpperbound(key, comparator_)};
     BUSTUB_ASSERT(upperbound_idx > 0, "All keys in this node are above `key`? Invariant broken.");
-    page_g = bpm_->ReadPage(page_data->ValueAt(upperbound_idx - 1));
+    page_id_t next_id{page_data->ValueAt(upperbound_idx - 1)};
+    page_g.Drop();
+    page_g = bpm_->ReadPage(next_id);
   }
   BUSTUB_ASSERT(page_g.As<BPlusTreePage>()->IsLeafPage(), "Unexpected.");
   auto page_data{page_g.As<LeafPage>()};
@@ -543,7 +553,9 @@ void BPLUSTREE_TYPE::GetPathTo(int to_level, const KeyType &key, PathContainer &
   path.EmplaceBack(page_g.GetPageId());
   while (page_header_data->GetLevel() > to_level) {
     int upperbound_idx{page_data->FindIndexUpperbound(key, comparator_)};
-    page_g = bpm_->ReadPage(page_data->ValueAt(upperbound_idx - 1));
+    page_id_t next_id{page_data->ValueAt(upperbound_idx - 1)};
+    page_g.Drop();
+    page_g = bpm_->ReadPage(next_id);
     page_header_data = page_g.As<BPlusTreePage>();
     page_data = page_g.As<InternalPage>();
     path.EmplaceBack(page_g.GetPageId());

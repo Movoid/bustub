@@ -130,6 +130,10 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::SetLowKey(std::nullopt_t null) { lowkey_valid_ 
  *
  * 除了最右侧节点, 其他所有节点都不允许设置 `high_key_is_valid_ == false`,
  * 否则可能对空节点错误判断为 `CoveredKey() == true`.
+ *
+ * WARNING: 存在问题.
+ * 若当前 Leaf 是最右侧节点且发生 Merge,
+ * 其 `HasValidHighKey() == false` 误导了 `GoSib*` 留在当前节点.
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_LEAF_PAGE_TYPE::CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool {
@@ -248,9 +252,10 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage_g, 
       SetHighKey(std::nullopt);
     }
     rpage->SetLowKey(std::nullopt);
+    rpage->SetHighKey(KeyType{});
     /**
-     * Leave `rpage` highkey unset.
-     * Because this page may have invalid lowkey.
+     * `rpage` 的 HighKey 必须被设置, 即使是另一个节点无效的 lowkey.
+     * 否则会误导 `GoSib*` 的判断, 导致停留在已经被 Merge 的最右侧的 `rpage`.
      */
   } else {  // Split
     if (HasValidHighKey()) {
