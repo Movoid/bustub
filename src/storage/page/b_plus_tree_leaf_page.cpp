@@ -217,7 +217,7 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage_g, 
   int r_diff_cnt{r_size - rpage_g.As<BPlusTreeLeafPage>()->GetSize()};
 
   BUSTUB_ASSERT(l_diff_cnt + r_diff_cnt == 0, "Invalid args.");
-  BUSTUB_ASSERT(l_size != 0, "This operation is denied.");
+  BUSTUB_ASSERT(r_size != 0, "This operation is denied.");
 
   auto rpage{rpage_g.AsMut<BPlusTreeLeafPage>()};
 

@@ -160,6 +160,10 @@ class BPlusTreeLeafPage : public BPlusTreePage {
   /**
    * LowKey 机制.
    * 指示当前 LeafPage 的 kv lowerbound. 不可变.
+   *
+   * Root Leaf 也要有 lowkey.
+   * > 所有的 Node 都必须要有 lowkey.
+   * > lowkey 是路由的核心机制.
    */
   bool lowkey_valid_;
   KeyType lowkey_;
