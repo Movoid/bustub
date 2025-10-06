@@ -38,9 +38,10 @@ enum class IndexPageType : std::uint8_t {
  */
 enum class BackfixStatus : std::uint8_t {
   INVALID,
-  NOT_LINKED_IN_PARENT,
-  IS_LINKED_IN_PARENT,
-  DONT_LINK_IN_PARENT,
+  NEED_LINK,
+  NEED_UNLINK,  // Not used. todo.
+  IS_LINKED,
+  IS_UNLINKED,
 };
 
 enum class BackfixType : std::uint8_t {
@@ -146,6 +147,6 @@ class BPlusTreePage {
    */
 };
 
-#define GENERAL_PAGE_HEADER_SIZE sizeof(BPlusTreePage)
+constexpr int GENERAL_PAGE_HEADER_SIZE{sizeof(BPlusTreePage)};
 
 }  // namespace bustub

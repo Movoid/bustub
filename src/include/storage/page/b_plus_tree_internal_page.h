@@ -19,12 +19,6 @@
 
 namespace bustub {
 
-#define B_PLUS_TREE_INTERNAL_PAGE_TYPE BPlusTreeInternalPage<KeyType, ValueType, KeyComparator>
-#define INTERNAL_PAGE_HEADER_SIZE (sizeof(page_id_t) + sizeof(std::optional<KeyType>) * 2)
-#define INTERNAL_PAGE_SLOT_CNT                                                 \
-  ((BUSTUB_PAGE_SIZE - GENERAL_PAGE_HEADER_SIZE - INTERNAL_PAGE_HEADER_SIZE) / \
-   ((int)(sizeof(KeyType) + sizeof(ValueType))))  // NOLINT
-
 /**
  * Store `n` indexed keys and `n + 1` child pointers (page_id) within internal page.
  * Pointer PAGE_ID(i) points to a subtree in which all keys K satisfy:
@@ -57,10 +51,66 @@ namespace bustub {
  */
 INDEX_TEMPLATE_ARGUMENTS
 class BPlusTreeInternalPage : public BPlusTreePage {
+ private:
+  struct KvPair {
+    KeyType x_;
+    ValueType y_;
+  };
+  struct InternalPageHeader {
+    /**
+     * 当前 Level 下一个 Node id.
+     */
+    page_id_t next_page_id_;
+
+    /**
+     * 分裂时, 设置为 Sibling 的 Key[0],
+     * 用于在 Level 内沿着 Sibling Link 搜索 key.
+     *
+     * `highkey_` 不保证严格正确.
+     * 若 key > `highkey_`, 则 key 不属于当前 Node.
+     *
+     * 只有在 `next_page_id_ != INVALID_PAGE_ID` 时才有效.
+     */
+    KeyType highkey_;
+
+    /**
+     * 是当前 Level 的起始 Node.
+     * 在被从 parent unlink 之后, 可以被直接 QSBR Retire.
+     * 对于其他 Node, 由于被 Level 左侧 Node 的 Sibling Link 连接,
+     * 不可 Retire.
+     *
+     * Level 起始 Node 发生 Merge 后,
+     * 应继续尝试 Merge.
+     */
+    bool is_level_head_;
+
+    /**
+     * 分裂时, 新 Node 的 `lowkey_` 被设置为 Key[0].
+     * `lowkey_` 用于在 parent 中路由到当前节点.
+     *
+     * 指示若 key >= `lowkey_` 则 key 一定位于此节点及之后.
+     * > Root Leaf 在第一次 `Insert` 必须手动初始化 `lowkey_`.
+     */
+    KeyType lowkey_;
+  } hdr_;
+
+  constexpr static int INTERNAL_PAGE_HEADER_SIZE{sizeof(InternalPageHeader)};
+  constexpr static int INTERNAL_PAGE_SLOT_CNT{
+      (BUSTUB_PAGE_SIZE - GENERAL_PAGE_HEADER_SIZE - INTERNAL_PAGE_HEADER_SIZE) / sizeof(KvPair)};
+
+  /**
+   * Array members for page data.
+   * 此处数组大小基于 1 Page 大小计算.
+   */
+  KeyType key_array_[INTERNAL_PAGE_SLOT_CNT];
+  ValueType page_id_array_[INTERNAL_PAGE_SLOT_CNT];
+  // (Spring 2025) Feel free to add more fields and helper functions below if needed
  public:
   // Delete all constructor / destructor to ensure memory safety
   BPlusTreeInternalPage() = delete;
   BPlusTreeInternalPage(const BPlusTreeInternalPage &other) = delete;
+
+  constexpr static int INTERNAL_PAGE_SLOT_CNT_MAX{INTERNAL_PAGE_SLOT_CNT};
 
   /**
    * 直接调用此函数初始化, 其中封装了对 BPlusTreePage 的初始化.
@@ -110,25 +160,17 @@ class BPlusTreeInternalPage : public BPlusTreePage {
   /**
    * Custom helpers.
    */
-  auto HasValidHighKey() const -> bool;
   auto GetHighKey() const -> const KeyType &;
   void SetHighKey(const KeyType &key);
-  void SetHighKey(std::nullopt_t null);
 
-  auto HasValidLowKey() const -> bool;
+  auto IsLevelHead() const -> bool;
+  void SetIsLevelHead(bool is_level_head);
+
   auto GetLowKey() const -> const KeyType &;
   void SetLowKey(const KeyType &key);
-  void SetLowKey(std::nullopt_t null);
 
   auto CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool;
-  /**
-   * 找 upper bound.
-   * 在需要新增 KV Pair 的时候寻找 Slot.
-   *
-   * 如果任何区间都不匹配 `key`,
-   * 如, `key >= this->high_key_`,
-   * 则返回 -1.
-   */
+
   auto FindIndexUpperbound(const KeyType &key, KeyComparator &cmp) const -> int;
 
   auto FindIndexLowerbound(const KeyType &key, KeyComparator &cmp) const -> int;
@@ -143,43 +185,9 @@ class BPlusTreeInternalPage : public BPlusTreePage {
   void ModifyKvAt(int index, const KeyType &key, const ValueType &val);
   void DeleteKvAt(int index);
 
-  void RedistributeWithRight(WritePageGuard &rpage_g, int l_size, int r_size);
-
- private:
-  /**
-   * Sibling internal page id,
-   * B Link Tree 的额外结构.
-   */
-  page_id_t next_page_id_;
-
-  /**
-   * 基于 B Link Tree,
-   * 需要维护一个 `high_key_` 指明当前 Node 覆盖范围的 upper bound.
-   * 分裂时, 其更新为分隔 key 的值,
-   * 合并时, 合并后节点更新为较大值.
-   *
-   * 必须先检查 `high_key_is_valid_`.
-   * 只有最右侧节点 `high_key_is_valid_ == false`.
-   * 空节点的 `high_key_` 仍有效.
-   */
-  bool highkey_valid_;
-  KeyType highkey_;
-
-  /**
-   * 此 bool flag 标记指向最左侧代表无穷小的区间.
-   * 为插入比当前 Tree 中最小 key 更小的 key 提供支持.
-   *
-   * NOTE: 在所有情况下, `lowkey_` 应该和 `key[0]` 相等.
-   */
-  bool lowkey_valid_;
-
-  /**
-   * Array members for page data.
-   * 此处数组大小基于 1 Page 大小计算.
-   */
-  KeyType key_array_[INTERNAL_PAGE_SLOT_CNT];
-  ValueType page_id_array_[INTERNAL_PAGE_SLOT_CNT];
-  // (Spring 2025) Feel free to add more fields and helper functions below if needed
+  void RedistributeWithRight(WritePageGuard &rpage_g_w, int l_size, int r_size);
 };
+
+#define B_PLUS_TREE_INTERNAL_PAGE_TYPE BPlusTreeInternalPage<KeyType, ValueType, KeyComparator>
 
 }  // namespace bustub

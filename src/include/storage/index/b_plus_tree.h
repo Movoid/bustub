@@ -1235,8 +1235,8 @@ class BPlusTree {
    * `BPlusTreeInternalPage` 中第一个 `key` 是 invalid 的, 仍算入 `size` 中.
    */
   explicit BPlusTree(std::string name, page_id_t header_page_id, BufferPoolManager *buffer_pool_manager,
-                     const KeyComparator &comparator, int leaf_max_size = LEAF_PAGE_SLOT_CNT,
-                     int internal_max_size = INTERNAL_PAGE_SLOT_CNT);
+                     const KeyComparator &comparator, int leaf_max_size = LeafPage::LEAF_PAGE_SLOT_CNT_MAX,
+                     int internal_max_size = InternalPage::INTERNAL_PAGE_SLOT_CNT_MAX);
 
   ~BPlusTree();
 
@@ -1286,8 +1286,8 @@ class BPlusTree {
 
   void GetPathTo(int level, const KeyType &key, PathContainer &path);
 
-  auto TrySplit(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool;
-  auto TryMerge(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool;
+  auto TrySplitAndGo(WritePageGuard &page_g, const KeyType &key, IndexKvPack &backfix_kv) -> bool;
+  auto TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool;
 
   /**
    * 这两个应该由 TrySplit/TryMerge 调用.

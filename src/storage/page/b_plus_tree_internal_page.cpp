@@ -32,21 +32,20 @@ namespace bustub {
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
-  BUSTUB_ASSERT(max_size > 0 && static_cast<std::uint64_t>(max_size) <= INTERNAL_PAGE_SLOT_CNT, "Invalid init.");
+  BUSTUB_ASSERT(max_size > 0 && static_cast<std::uint64_t>(max_size) <= INTERNAL_PAGE_SLOT_CNT_MAX, "Invalid init.");
   SetSize(0);
   SetMaxSize(max_size);
   SetPageType(IndexPageType::INTERNAL_PAGE);
   SetNextPageId(INVALID_PAGE_ID);
-  SetHighKey(std::nullopt);
-  SetLowKey(std::nullopt);
-  SetBackfixStatus(BackfixStatus::NOT_LINKED_IN_PARENT);
+  SetLowKey(KeyType{});
+  SetBackfixStatus(BackfixStatus::INVALID);
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetNextPageId() const -> page_id_t { return next_page_id_; }
+auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetNextPageId() const -> page_id_t { return hdr_.next_page_id_; }
 
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetNextPageId(page_id_t next_page_id) { next_page_id_ = next_page_id; }
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetNextPageId(page_id_t next_page_id) { hdr_.next_page_id_ = next_page_id; }
 
 /**
  * @brief Helper method to get/set the key associated with input "index"(a.k.a
@@ -87,43 +86,19 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::ValueAt(int index) const -> const ValueType
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::HasValidHighKey() const -> bool {
-  BUSTUB_ASSERT(!highkey_valid_ || GetNextPageId() != INVALID_PAGE_ID, "Invariant broken.");
-  BUSTUB_ASSERT(GetSize() != 0 || highkey_valid_, "Invariant broken.");
-  return highkey_valid_;
-}
-
-INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetHighKey() const -> const KeyType & {
-  BUSTUB_ASSERT(HasValidHighKey(), "Memory corrupted?");
-  return highkey_;
+  BUSTUB_ASSERT(GetNextPageId() != INVALID_PAGE_ID, "Memory corrupted?");
+  return hdr_.highkey_;
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetHighKey(const KeyType &high_key) {
-  highkey_ = high_key;
-  highkey_valid_ = true;
-}
-INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetHighKey(std::nullopt_t null) { highkey_valid_ = false; }
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetHighKey(const KeyType &high_key) { hdr_.highkey_ = high_key; }
 
 INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::HasValidLowKey() const -> bool { return lowkey_valid_; }
+auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetLowKey() const -> const KeyType & { return hdr_.lowkey_; }
 
 INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetLowKey() const -> const KeyType & {
-  BUSTUB_ASSERT(HasValidLowKey(), "Memory corrupted?");
-  return KeyAt(0);
-}
-
-INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetLowKey(const KeyType &low_key) {
-  SetKeyAt(0, low_key);
-  lowkey_valid_ = true;
-}
-
-INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetLowKey(std::nullopt_t null) { lowkey_valid_ = false; }
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetLowKey(const KeyType &low_key) { hdr_.lowkey_ = low_key; }
 
 /**
  * InternalNode 的 `high_key_` 是 inclusive upperbound.
@@ -136,7 +111,7 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetLowKey(std::nullopt_t null) { lowkey_val
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool {
-  return !HasValidHighKey() || (GetSize() > 0 && cmp(key, GetHighKey()) <= 0);
+  return GetNextPageId() == INVALID_PAGE_ID || (GetSize() > 0 && cmp(key, GetHighKey()) <= 0);
 }
 
 /**
@@ -144,7 +119,7 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::CoveredKey(const KeyType &key, KeyComparato
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndexUpperbound(const KeyType &key, KeyComparator &cmp) const -> int {
-  int l{HasValidLowKey() ? 0 : 1};  // [0, l) -> x <= key.
+  int l{0};          // [0, l) -> x <= key.
   int r{GetSize()};  // [r, GetSize()) -> x > key.
   while (r - l > 0) {
     int mid{l + ((r - l) / 2)};
@@ -163,7 +138,7 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndexUpperbound(const KeyType &key, Key
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndexLowerbound(const KeyType &key, KeyComparator &cmp) const -> int {
-  int l{HasValidLowKey() ? 0 : 1};  // [0, l) -> x < key.
+  int l{0};          // [0, l) -> x < key.
   int r{GetSize()};  // [r, GetSize()) -> x >= key.
   while (r - l > 0) {
     int mid{l + ((r - l) / 2)};
@@ -194,9 +169,6 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::NewKvAt(int index) {
   int to{index + 1};
   int mv_cnt{GetSize() - begin};
   BUSTUB_ASSERT(mv_cnt >= 0, "Invalid args.");
-  /**
-   * NOTICE: `index` cannot be `0`. This would break invariants.
-   */
   BUSTUB_ASSERT(0 <= index && index <= GetSize(), "Invalid args.");
   std::memmove(key_array_ + to, key_array_ + begin, sizeof(KeyType) * mv_cnt);
   std::memmove(page_id_array_ + to, page_id_array_ + begin, sizeof(ValueType) * mv_cnt);
@@ -228,45 +200,40 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage
   int r_diff_cnt{r_size - rpage_g.As<BPlusTreeInternalPage>()->GetSize()};
 
   BUSTUB_ASSERT(l_diff_cnt + r_diff_cnt == 0, "Invalid args.");
-  BUSTUB_ASSERT(l_size != 0, "Invalid operation.");
+  BUSTUB_ASSERT(r_size != 0, "Invalid operation.");
 
-  auto rpage{rpage_g.AsMut<BPlusTreeInternalPage>()};
+  auto rpage_data{rpage_g.AsMut<BPlusTreeInternalPage>()};
 
   if (l_diff_cnt > 0) {
     // l need `+l_diff_cnt` kv pairs.
-    std::memmove(key_array_ + GetSize(), rpage->key_array_, sizeof(KeyType) * l_diff_cnt);
-    std::memmove(page_id_array_ + GetSize(), rpage->page_id_array_, sizeof(ValueType) * l_diff_cnt);
-    std::memmove(rpage->key_array_, rpage->key_array_ + l_diff_cnt, sizeof(KeyType) * (rpage->GetSize() - l_diff_cnt));
-    std::memmove(rpage->page_id_array_, rpage->page_id_array_ + l_diff_cnt,
-                 sizeof(ValueType) * (rpage->GetSize() - l_diff_cnt));
+    std::memmove(key_array_ + GetSize(), rpage_data->key_array_, sizeof(KeyType) * l_diff_cnt);
+    std::memmove(page_id_array_ + GetSize(), rpage_data->page_id_array_, sizeof(ValueType) * l_diff_cnt);
+    std::memmove(rpage_data->key_array_, rpage_data->key_array_ + l_diff_cnt,
+                 sizeof(KeyType) * (rpage_data->GetSize() - l_diff_cnt));
+    std::memmove(rpage_data->page_id_array_, rpage_data->page_id_array_ + l_diff_cnt,
+                 sizeof(ValueType) * (rpage_data->GetSize() - l_diff_cnt));
 
   } else if (r_diff_cnt > 0) {
     // r need `+r_diff_cnt` kv pairs.
-    std::memmove(rpage->key_array_ + r_diff_cnt, rpage->key_array_, sizeof(KeyType) * rpage->GetSize());
-    std::memmove(rpage->page_id_array_ + r_diff_cnt, rpage->page_id_array_, sizeof(ValueType) * rpage->GetSize());
-    std::memmove(rpage->key_array_, key_array_ + GetSize() - r_diff_cnt, sizeof(KeyType) * r_diff_cnt);
-    std::memmove(rpage->page_id_array_, page_id_array_ + GetSize() - r_diff_cnt, sizeof(ValueType) * r_diff_cnt);
+    std::memmove(rpage_data->key_array_ + r_diff_cnt, rpage_data->key_array_, sizeof(KeyType) * rpage_data->GetSize());
+    std::memmove(rpage_data->page_id_array_ + r_diff_cnt, rpage_data->page_id_array_,
+                 sizeof(ValueType) * rpage_data->GetSize());
+    std::memmove(rpage_data->key_array_, key_array_ + GetSize() - r_diff_cnt, sizeof(KeyType) * r_diff_cnt);
+    std::memmove(rpage_data->page_id_array_, page_id_array_ + GetSize() - r_diff_cnt, sizeof(ValueType) * r_diff_cnt);
   }
 
   SetSize(l_size);
-  rpage->SetSize(r_size);
+  rpage_data->SetSize(r_size);
 
-  if (rpage->GetSize() == 0) {  // Merge
-    if (rpage->HasValidHighKey()) {
-      SetHighKey(rpage->GetHighKey());
-    } else {
-      SetHighKey(std::nullopt);
+  if (GetSize() == 0) {
+    SetHighKey(rpage_data->KeyAt(0));
+  } else {
+    BUSTUB_ASSERT(GetSize() != 0 && rpage_data->GetSize() != 0, "Invalid args.");
+    if (GetNextPageId() != INVALID_PAGE_ID) {
+      rpage_data->SetHighKey(GetHighKey());
     }
-    rpage->SetLowKey(std::nullopt);
-    rpage->SetHighKey(KeyType{});
-  } else {  // Split
-    if (HasValidHighKey()) {
-      rpage->SetHighKey(GetHighKey());
-    } else {
-      rpage->SetHighKey(std::nullopt);
-    }
-    rpage->SetLowKey(rpage->KeyAt(0));
-    SetHighKey(rpage->GetLowKey());
+    rpage_data->SetLowKey(rpage_data->KeyAt(0));
+    SetHighKey(rpage_data->KeyAt(0));
   }
 }
 
