@@ -74,6 +74,10 @@ class BPlusTreeLeafPage : public BPlusTreePage {
      *
      * 指示若 key >= `lowkey_` 则 key 一定位于此节点及之后.
      * > Root Leaf 在第一次 `Insert` 必须手动初始化 `lowkey_`.
+     *
+     * WARNING: 当前节点内的所有 key 都必须大于 `lowkey_`,
+     * 否则 Split 时, 新节点的 `lowkey_` 可能小于当前节点的 `lowkey_`,
+     * 并占据了 parent 中 Kv[0] 的位置, 导致到最小 key 的路由错误.
      */
     KeyType lowkey_;
   } hdr_;

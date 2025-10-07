@@ -88,7 +88,10 @@ void BPlusTreePage::SetNextPageId(page_id_t next_page_id) { next_page_id_ = next
 
 auto BPlusTreePage::IsLevelHead() const -> bool { return is_level_head_; }
 
-void BPlusTreePage::SetIsLevelHead(bool is_level_head) { is_level_head_ = is_level_head; }
+void BPlusTreePage::SetIsLevelHead(bool is_level_head) {
+  BUSTUB_ASSERT(GetSize() > 0, "Invalid operaton.");
+  is_level_head_ = is_level_head;
+}
 
 auto BPlusTreePage::IsOverflowed() const -> bool { return GetSize() >= GetMaxSize(); }
 

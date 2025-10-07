@@ -860,8 +860,7 @@ class SmallVector {
 
   SmallVector() = default;
 
-  SmallVector(const SmallVector &that) noexcept(VAL_COPY_MOVE_CTOR_NOEXCEPT && ALLOC_SELECT_NOEXCEPT &&
-                                                ALLOC_MOVE_CTOR_NOEXCEPT) {
+  SmallVector(const SmallVector &that) {
     auto alloc_select{allocator_traits_::select_on_container_copy_construction(that.alloc_)};
     ::new (std::addressof(alloc_)) Alloc{std::move(alloc_select)};
     if (!that.is_inline_) [[unlikely]] {
@@ -873,7 +872,7 @@ class SmallVector {
     is_inline_ = that.is_inline_;
   }
 
-  SmallVector(SmallVector &&that) noexcept(VAL_COPY_MOVE_CTOR_NOEXCEPT && ALLOC_MOVE_CTOR_NOEXCEPT) {
+  SmallVector(SmallVector &&that) noexcept {
     ::new (std::addressof(alloc_)) Alloc{std::move(that.alloc_)};
     if (that.is_inline_) [[likely]] {
       ValType *inline_data{reinterpret_cast<ValType *>(inline_data_)};
@@ -888,8 +887,7 @@ class SmallVector {
     is_inline_ = that.is_inline_;
   }
 
-  auto operator=(const SmallVector &that) noexcept(VAL_COPY_MOVE_ASSIGN_NOEXCEPT && ALLOC_COPY_ASSIGN_NOEXCEPT)
-      -> SmallVector & {
+  auto operator=(const SmallVector &that) -> SmallVector & {
     if (this == std::addressof(that)) {
       return *this;
     }
@@ -921,8 +919,7 @@ class SmallVector {
     return *this;
   }
 
-  auto operator=(SmallVector &&that) noexcept(VAL_COPY_MOVE_ASSIGN_NOEXCEPT && ALLOC_MOVE_ASSIGN_NOEXCEPT)
-      -> SmallVector & {
+  auto operator=(SmallVector &&that) noexcept -> SmallVector & {
     if (this == std::addressof(that)) {
       return *this;
     }
