@@ -58,11 +58,6 @@ class BPlusTreeLeafPage : public BPlusTreePage {
   };
   struct LeafPageHeader {
     /**
-     * 当前 Level 下一个 Node id.
-     */
-    page_id_t next_page_id_;
-
-    /**
      * 分裂时, 设置为 Sibling 的 Key[0],
      * 用于在 Level 内沿着 Sibling Link 搜索 key.
      *
@@ -72,17 +67,6 @@ class BPlusTreeLeafPage : public BPlusTreePage {
      * 只有在 `next_page_id_ != INVALID_PAGE_ID` 时才有效.
      */
     KeyType highkey_;
-
-    /**
-     * 是当前 Level 的起始 Node.
-     * 在被从 parent unlink 之后, 可以被直接 QSBR Retire.
-     * 对于其他 Node, 由于被 Level 左侧 Node 的 Sibling Link 连接,
-     * 不可 Retire.
-     *
-     * Level 起始 Node 发生 Merge 后,
-     * 应继续尝试 Merge.
-     */
-    bool is_level_head_;
 
     /**
      * 分裂时, 新 Node 的 `lowkey_` 被设置为 Key[0].
@@ -115,11 +99,9 @@ class BPlusTreeLeafPage : public BPlusTreePage {
   /**
    * 直接调用此函数初始化, 其中封装了对 BPlusTreePage 的初始化.
    */
-  void Init(int max_size = LEAF_PAGE_SLOT_CNT);
+  void Init(int max_size = LEAF_PAGE_SLOT_CNT_MAX);
 
   // Helper methods
-  auto GetNextPageId() const -> page_id_t;
-  void SetNextPageId(page_id_t next_page_id);
   auto KeyAt(int index) const -> const KeyType &;
   void SetKeyAt(int index, const KeyType &key);
 
@@ -155,9 +137,6 @@ class BPlusTreeLeafPage : public BPlusTreePage {
    */
   auto GetHighKey() const -> const KeyType &;
   void SetHighKey(const KeyType &high_key);
-
-  auto IsLevelHead() const -> bool;
-  void SetIsLevelHead(bool is_level_head);
 
   auto GetLowKey() const -> const KeyType &;
   void SetLowKey(const KeyType &low_key);

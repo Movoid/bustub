@@ -40,20 +40,24 @@ auto INDEXITERATOR_TYPE::operator*() -> std::pair<const KeyType &, const ValueTy
 INDEX_TEMPLATE_ARGUMENTS
 auto INDEXITERATOR_TYPE::operator++() -> INDEXITERATOR_TYPE & {
   BUSTUB_ASSERT(!IsEnd(), "Invalid instance.");
+  BUSTUB_ASSERT(page_g_opt_.has_value(), "Unexpected.");
   BUSTUB_ASSERT(page_g_opt_.value().As<BPlusTreePage>()->IsLeafPage(), "Unexpected.");
-  auto page_data{page_g_opt_.value().As<LeafPage>()};
   offset_++;
-  if (offset_ < page_data->GetSize()) {
-    return *this;
+
+  auto page_data{page_g_opt_.value().As<LeafPage>()};
+  while (offset_ == page_data->GetSize() && page_data->GetNextPageId() != INVALID_PAGE_ID) {
+    page_id_t sib_id{page_data->GetNextPageId()};
+    page_g_opt_.value().Drop();
+    page_g_opt_ = bpm_->ReadPage(sib_id);
+    page_data = page_g_opt_.value().As<LeafPage>();
+    offset_ = 0;
   }
-  page_id_t sib_id{page_data->GetNextPageId()};
-  if (sib_id == INVALID_PAGE_ID) {
+
+  if (offset_ == page_data->GetSize()) {
     page_g_opt_ = std::nullopt;
     offset_ = -1;
-    return *this;
   }
-  page_g_opt_ = std::make_optional(bpm_->ReadPage(sib_id));
-  offset_ = 0;
+
   return *this;
 }
 

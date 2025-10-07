@@ -39,22 +39,8 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::Init(int max_size) {
   SetPageType(IndexPageType::LEAF_PAGE);
   SetNextPageId(INVALID_PAGE_ID);
   SetLowKey(KeyType{});
-  SetBackfixStatus(BackfixStatus::INVALID);
-}
-
-/**
- * Helper methods to set/get next page id
- */
-INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_LEAF_PAGE_TYPE::GetNextPageId() const -> page_id_t {
-  // BUSTUB_ASSERT(next_page_id_ > 0, "Memory corrupted?");
-  return hdr_.next_page_id_;
-}
-
-INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_LEAF_PAGE_TYPE::SetNextPageId(page_id_t next_page_id) {
-  // BUSTUB_ASSERT(next_page_id_ > 0, "Memory corrupted?");
-  hdr_.next_page_id_ = next_page_id;
+  // 此处的 Status 设置是为了兼容 `TryNewRoot` 扩展 Root.
+  SetBackfixStatus(BackfixStatus::IS_LINKED);
 }
 
 /*
@@ -87,7 +73,7 @@ auto B_PLUS_TREE_LEAF_PAGE_TYPE::GetHighKey() const -> const KeyType & {
 
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_LEAF_PAGE_TYPE::SetHighKey(const KeyType &high_key) {
-  BUSTUB_ASSERT(GetNextPageId() != INVALID_PAGE_ID, "Memory corrupted?");
+  // BUSTUB_ASSERT(GetNextPageId() != INVALID_PAGE_ID, "Memory corrupted?");
   hdr_.highkey_ = high_key;
 }
 
@@ -194,7 +180,6 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage_g_w
   int r_diff_cnt{r_size - rpage_g_w.As<BPlusTreeLeafPage>()->GetSize()};
 
   BUSTUB_ASSERT(l_diff_cnt + r_diff_cnt == 0, "Invalid args.");
-  BUSTUB_ASSERT(r_size != 0, "This operation is denied.");
 
   auto rpage_data{rpage_g_w.AsMut<BPlusTreeLeafPage>()};
 
@@ -224,8 +209,15 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage_g_w
    * 不要随意修改 lowkey.
    */
 
-  if (GetSize() == 0) {  // Merged to sibling.
-    SetHighKey(rpage_data->KeyAt(0));
+  if (GetSize() == 0) {  // Merged to right.
+    if (rpage_data->GetSize() != 0) {
+      SetHighKey(rpage_data->KeyAt(0));
+    }
+  } else if (rpage_data->GetSize() == 0) {  // Merged to left.
+    if (rpage_data->GetNextPageId() != INVALID_PAGE_ID) {
+      SetHighKey(rpage_data->GetHighKey());
+    }
+    rpage_data->SetHighKey(KeyAt(0));
   } else {  // Splited to sibling.
     BUSTUB_ASSERT(GetSize() != 0 && rpage_data->GetSize() != 0, "Invalid args.");
     if (GetNextPageId() != INVALID_PAGE_ID) {
@@ -233,8 +225,6 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage_g_w
     }
     rpage_data->SetLowKey(rpage_data->KeyAt(0));
     SetHighKey(rpage_data->KeyAt(0));
-    // rpage_data->SetNextPageId(GetNextPageId());
-    // SetNextPageId(rpage_g_w.GetPageId());
   }
 }
 

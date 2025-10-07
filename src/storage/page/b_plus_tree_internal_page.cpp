@@ -38,15 +38,8 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
   SetPageType(IndexPageType::INTERNAL_PAGE);
   SetNextPageId(INVALID_PAGE_ID);
   SetLowKey(KeyType{});
-  SetBackfixStatus(BackfixStatus::INVALID);
+  SetBackfixStatus(BackfixStatus::IS_LINKED);
 }
-
-INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetNextPageId() const -> page_id_t { return hdr_.next_page_id_; }
-
-INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetNextPageId(page_id_t next_page_id) { hdr_.next_page_id_ = next_page_id; }
-
 /**
  * @brief Helper method to get/set the key associated with input "index"(a.k.a
  * array offset).
@@ -200,7 +193,7 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage
   int r_diff_cnt{r_size - rpage_g.As<BPlusTreeInternalPage>()->GetSize()};
 
   BUSTUB_ASSERT(l_diff_cnt + r_diff_cnt == 0, "Invalid args.");
-  BUSTUB_ASSERT(r_size != 0, "Invalid operation.");
+  BUSTUB_ASSERT(r_size != 0 || l_size == 0, "This operation is denied.");
 
   auto rpage_data{rpage_g.AsMut<BPlusTreeInternalPage>()};
 
@@ -225,9 +218,16 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage
   SetSize(l_size);
   rpage_data->SetSize(r_size);
 
-  if (GetSize() == 0) {
-    SetHighKey(rpage_data->KeyAt(0));
-  } else {
+  if (GetSize() == 0) {  // Merge to right.
+    if (rpage_data->GetSize() != 0) {
+      SetHighKey(rpage_data->KeyAt(0));
+    }
+  } else if (rpage_data->GetSize() == 0) {  // Merge to left.
+    if (rpage_data->GetNextPageId() != INVALID_PAGE_ID) {
+      SetHighKey(rpage_data->GetHighKey());
+    }
+    rpage_data->SetHighKey(KeyAt(0));
+  } else {  // Split.
     BUSTUB_ASSERT(GetSize() != 0 && rpage_data->GetSize() != 0, "Invalid args.");
     if (GetNextPageId() != INVALID_PAGE_ID) {
       rpage_data->SetHighKey(GetHighKey());

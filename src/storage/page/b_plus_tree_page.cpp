@@ -82,6 +82,14 @@ void BPlusTreePage::SetBackfixStatus(BackfixStatus status) {
   backfix_status_ = status;
 }
 
+auto BPlusTreePage::GetNextPageId() const -> page_id_t { return next_page_id_; }
+
+void BPlusTreePage::SetNextPageId(page_id_t next_page_id) { next_page_id_ = next_page_id; }
+
+auto BPlusTreePage::IsLevelHead() const -> bool { return is_level_head_; }
+
+void BPlusTreePage::SetIsLevelHead(bool is_level_head) { is_level_head_ = is_level_head; }
+
 auto BPlusTreePage::IsOverflowed() const -> bool { return GetSize() >= GetMaxSize(); }
 
 /** 无法通过均分解决 Overflow. */

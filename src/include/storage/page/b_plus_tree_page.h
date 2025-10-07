@@ -39,7 +39,7 @@ enum class IndexPageType : std::uint8_t {
 enum class BackfixStatus : std::uint8_t {
   INVALID,
   NEED_LINK,
-  NEED_UNLINK,  // Not used. todo.
+  NEED_UNLINK,
   IS_LINKED,
   IS_UNLINKED,
 };
@@ -95,6 +95,13 @@ class BPlusTreePage {
   auto GetBackfixStatus() const -> BackfixStatus;
   void SetBackfixStatus(BackfixStatus status);
 
+  // Helper methods
+  auto GetNextPageId() const -> page_id_t;
+  void SetNextPageId(page_id_t next_page_id);
+
+  auto IsLevelHead() const -> bool;
+  void SetIsLevelHead(bool is_level_head);
+
   /**
    * 只有在 `Is{Over, Under}flowedWith` 返回 `false` 时,
    * 才应该采取 Split/Merge.
@@ -140,6 +147,22 @@ class BPlusTreePage {
    * 用于 backfix remove kv 向上回溯.
    */
   BackfixStatus backfix_status_;
+
+  /**
+   * 当前 Level 下一个 Node id.
+   */
+  page_id_t next_page_id_;
+
+  /**
+   * 是当前 Level 的起始 Node.
+   * 在被从 parent unlink 之后, 可以被直接 QSBR Retire.
+   * 对于其他 Node, 由于被 Level 左侧 Node 的 Sibling Link 连接,
+   * 不可 Retire.
+   *
+   * Level 起始 Node 发生 Merge 后,
+   * 应继续尝试 Merge.
+   */
+  bool is_level_head_;
 
   /**
    * BPlusTreePage 不需要额外的锁,

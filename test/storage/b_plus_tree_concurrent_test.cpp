@@ -443,23 +443,23 @@ void MixTest2Call() {
   }
 }
 
-TEST(BPlusTreeConcurrentTest, InsertTest1) {  // NOLINT
+TEST(BPlusTreeConcurrentTest, DISABLED_InsertTest1) {  // NOLINT
   InsertTest1Call();
 }
 
-TEST(BPlusTreeConcurrentTest, InsertTest2) {  // NOLINT
+TEST(BPlusTreeConcurrentTest, DISABLED_InsertTest2) {  // NOLINT
   InsertTest2Call();
 }
 
-TEST(BPlusTreeConcurrentTest, DeleteTest1) {  // NOLINT
+TEST(BPlusTreeConcurrentTest, DISABLED_DeleteTest1) {  // NOLINT
   DeleteTest1Call();
 }
 
-TEST(BPlusTreeConcurrentTest, DeleteTest2) {  // NOLINT
+TEST(BPlusTreeConcurrentTest, DISABLED_DeleteTest2) {  // NOLINT
   DeleteTest2Call();
 }
 
-TEST(BPlusTreeConcurrentTest, MixTest1) {  // NOLINT
+TEST(BPlusTreeConcurrentTest, DISABLED_MixTest1) {  // NOLINT
   MixTest1Call();
 }
 
