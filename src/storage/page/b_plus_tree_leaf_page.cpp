@@ -80,10 +80,16 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::SetHighKey(const KeyType &high_key) {
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_LEAF_PAGE_TYPE::GetLowKey() const -> const KeyType & { return hdr_.lowkey_; }
+auto B_PLUS_TREE_LEAF_PAGE_TYPE::GetLowKey() const -> const KeyType & {
+  BUSTUB_ASSERT(!IsLevelHead(), "Invalid operation.");
+  return hdr_.lowkey_;
+}
 
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_LEAF_PAGE_TYPE::SetLowKey(const KeyType &low_key) { hdr_.lowkey_ = low_key; }
+void B_PLUS_TREE_LEAF_PAGE_TYPE::SetLowKey(const KeyType &low_key) {
+  BUSTUB_ASSERT(!IsLevelHead(), "Invalid operation.");
+  hdr_.lowkey_ = low_key;
+}
 
 /**
  * 和 InternalNode 不同,

@@ -98,7 +98,7 @@ auto BPlusTreePage::GetLowLevelHeadId() const -> page_id_t {
   return low_level_head_id_;
 }
 void BPlusTreePage::SetLowLevelHeadId(page_id_t low_level_head_id) {
-  BUSTUB_ASSERT(IsLevelHead(), "Invalid operation.");
+  // BUSTUB_ASSERT(IsLevelHead(), "Invalid operation.");
   low_level_head_id_ = low_level_head_id;
 }
 

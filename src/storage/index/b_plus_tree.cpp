@@ -704,15 +704,6 @@ auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_
       }
       int kv_sum{page_data->GetSize() + sib_data->GetSize()};
 
-      // 若 Sibling 是 IS_UNLINKED/NEED_LINK 状态,
-      // 将 `is_level_head_` 的 page_data 数据 Merge 到 Sibling,
-      // 将导致这部分数据失去路由.
-
-      // 解决方法是, 如果 Sibling 是 IS_UNLINKED/NEED_LINK 则将其 Merge 到左侧.
-      // 否则将 page_data Merge 到右侧.
-
-      // 只有 Sibling 为 IS_LINKED/NEED_LINK 状态才需要向右 Merge.
-
       /**
        * WARNING: Merge 方向不同, Protocol 修改的节点不同.
        */
@@ -726,6 +717,8 @@ auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_
         sib_data->SetNextPageId(page_g.GetPageId());
 
         sib_data->SetBackfixStatus(BackfixStatus::IS_UNLINKED);
+        // 如果 Sibling 是 IS_UNLINKED, 在此处 Retire.
+        // 也许 IS_UNLINKED 的逻辑能移动到 NEED_UNLINK 分支.
         qsbr_mgr_.Retire(sib_g_w.GetPageId());  // Retire.
         backfix_kv = std::nullopt;
         return false;
@@ -739,18 +732,37 @@ auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_
         // Check if is level head.
         // Merge to right.
         page_data->RedistributeWithRight(sib_g_w, 0, kv_sum);
-        if (page_data->IsLevelHead()) {
-          qsbr_mgr_.Retire(page_g.GetPageId());
-          sib_data->SetIsLevelHead(true);
-        }
-
+        /**
+         * 原 Level head page 被删除,
+         * 将右侧 Sibling 的 kv 从 Sibling 的 parent 删除.
+         * 之后让原 Level head page 的 `low_level_head_id_` 指向此 Sibling.
+         * 在合并 Internal Node 时, 将 `low_id_` 进行转移.
+         */
         auto page_status{page_data->GetBackfixStatus()};
 
         if (page_status == BackfixStatus::IS_LINKED) {
-          page_data->SetBackfixStatus(BackfixStatus::NEED_UNLINK);
-          backfix_kv = {page_data->GetLowKey(), page_g.GetPageId(), page_data->IsLevelHead(), sib_g_w.GetPageId()};
-          page_g = std::move(sib_g_w);
-          return true;
+          if (page_data->IsLevelHead()) {
+            /**
+             * 删除旧的 Level head page 和新 head 的 kv.
+             * 在 Backfix 里需要对 sib_data 进行二次校验.
+             */
+            qsbr_mgr_.Retire(page_g.GetPageId());
+            page_data->SetBackfixStatus(BackfixStatus::NEED_UNLINK);
+            /**
+             * 立刻 `SetIsLevelHead` 以便 Backfix 二次校验.
+             * 对 `page_data` 设为 `false` 避免旧操作覆盖 `sib_data` 新操作.
+             */
+            page_data->SetIsLevelHead(false);
+            sib_data->SetIsLevelHead(true);
+            backfix_kv = {sib_data->GetLowKey(), page_g.GetPageId(), true, sib_g_w.GetPageId()};
+            page_g = std::move(sib_g_w);
+            return true;
+          } else {  // NOLINT
+            page_data->SetBackfixStatus(BackfixStatus::NEED_UNLINK);
+            backfix_kv = {page_data->GetLowKey(), page_g.GetPageId(), false, INVALID_PAGE_ID};
+            page_g = std::move(sib_g_w);
+            return true;
+          }
         } else if (page_status == BackfixStatus::NEED_LINK) {  // NOLINT
           BUSTUB_ASSERT(page_data->IsLevelHead() == false, "Unexpected.");
           page_data->SetBackfixStatus(BackfixStatus::IS_UNLINKED);
@@ -764,7 +776,7 @@ auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_
       }
     }
 
-  } else {  // Internal
+  } else {  // Internal todo.
     auto page_data{page_g.AsMut<InternalPage>()};
     if (page_data->GetNextPageId() == INVALID_PAGE_ID) {
       backfix_kv = std::nullopt;
@@ -804,6 +816,10 @@ auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_
         if (page_data->IsLevelHead()) {  // Level head 一定没有左 Sibling.
           qsbr_mgr_.Retire(page_g.GetPageId());
           sib_data->SetIsLevelHead(true);
+          // 覆盖 Sibling 的 `low_level_head_id_`.
+          if (sib_data->GetLowLevelHeadId() == INVALID_PAGE_ID) {
+            sib_data->SetLowLevelHeadId(page_data->GetLowLevelHeadId());
+          }
         }
 
         auto page_status{page_data->GetBackfixStatus()};
@@ -833,21 +849,26 @@ INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::TryNewRoot(page_id_t &check_root_id, int new_level) -> bool {
   page_id_t new_root_id{INVALID_PAGE_ID};
 
-  WritePageGuard new_root_g_w{bpm_->WritePage(bpm_->NewPage())};
-  if (check_root_id == INVALID_PAGE_ID) {  // Create a new leaf root.
-    auto new_root_data{new_root_g_w.AsMut<LeafPage>()};
-    new_root_data->Init(leaf_max_size_);
-    new_root_data->SetLevel(new_level);
-    // Leaf need a placeholder lowkey.
-    new_root_data->SetIsLevelHead(true);
-  } else {
-    auto new_root_data{new_root_g_w.AsMut<InternalPage>()};
-    new_root_data->Init(internal_max_size_);
-    // Placeholder lowkey from child.
-    new_root_data->SetLevel(new_level);
-    new_root_data->SetIsLevelHead(true);
+  {
+    WritePageGuard new_root_g_w{bpm_->WritePage(bpm_->NewPage())};
+    if (check_root_id == INVALID_PAGE_ID) {  // Create a new leaf root.
+      auto new_root_data{new_root_g_w.AsMut<LeafPage>()};
+      new_root_data->Init(leaf_max_size_);
+      new_root_data->SetLevel(new_level);
+      new_root_data->SetBackfixStatus(BackfixStatus::IS_LINKED);
+      new_root_data->SetIsLevelHead(true);
+      // Low level head mechanism.
+      new_root_data->SetLowLevelHeadId(check_root_id);
+    } else {
+      auto new_root_data{new_root_g_w.AsMut<InternalPage>()};
+      new_root_data->Init(internal_max_size_);
+      new_root_data->SetLevel(new_level);
+      new_root_data->SetBackfixStatus(BackfixStatus::IS_LINKED);
+      new_root_data->SetIsLevelHead(true);
+      new_root_data->SetLowLevelHeadId(check_root_id);
+    }
+    new_root_id = new_root_g_w.GetPageId();
   }
-  new_root_id = new_root_g_w.GetPageId();
 
   BUSTUB_ASSERT(new_root_id != INVALID_PAGE_ID, "Unexpected.");
 
@@ -855,7 +876,6 @@ auto BPLUSTREE_TYPE::TryNewRoot(page_id_t &check_root_id, int new_level) -> bool
     WritePageGuard tree_header_g_w{bpm_->WritePage(header_page_id_)};
     auto tree_header_data{tree_header_g_w.AsMut<BPlusTreeHeaderPage>()};
     if (tree_header_data->root_page_id_ != INVALID_PAGE_ID) {
-      new_root_g_w.Drop();
       bpm_->DeletePage(new_root_id);
       check_root_id = tree_header_data->root_page_id_;
       return false;
@@ -869,7 +889,6 @@ auto BPLUSTREE_TYPE::TryNewRoot(page_id_t &check_root_id, int new_level) -> bool
         auto root_data{root_page_g.As<LeafPage>()};
         BUSTUB_ASSERT(root_data->IsLevelHead(), "Invalid args.");  // legacy !hasvalidlowkey == islevelhead.
         if (root_data->GetNextPageId() == INVALID_PAGE_ID) {       // 这一层只有 root.
-          new_root_g_w.Drop();
           bpm_->DeletePage(new_root_id);
           check_root_id = GetRootPageId();
           return false;
@@ -878,22 +897,17 @@ auto BPLUSTREE_TYPE::TryNewRoot(page_id_t &check_root_id, int new_level) -> bool
           WritePageGuard tree_header_g_w{bpm_->WritePage(header_page_id_)};
           auto tree_header_data{tree_header_g_w.AsMut<BPlusTreeHeaderPage>()};
           if (tree_header_data->root_page_id_ != check_root_id) {
-            new_root_g_w.Drop();
             bpm_->DeletePage(new_root_id);
             check_root_id = tree_header_data->root_page_id_;
             return false;
           }
           // Update root.
-          auto new_root_data{new_root_g_w.AsMut<InternalPage>()};
-          new_root_data->NewKvAt(0);
-          new_root_data->ModifyKvAt(0, root_data->GetLowKey(), check_root_id);
           tree_header_data->root_page_id_ = new_root_id;
         }
       } else {
         auto root_data{root_page_g.As<InternalPage>()};
         BUSTUB_ASSERT(root_data->IsLevelHead(), "Invalid args.");
         if (root_data->GetNextPageId() == INVALID_PAGE_ID) {
-          new_root_g_w.Drop();
           bpm_->DeletePage(new_root_id);
           check_root_id = GetRootPageId();
           return false;
@@ -902,15 +916,11 @@ auto BPLUSTREE_TYPE::TryNewRoot(page_id_t &check_root_id, int new_level) -> bool
           WritePageGuard tree_header_g_w{bpm_->WritePage(header_page_id_)};
           auto tree_header_data{tree_header_g_w.AsMut<BPlusTreeHeaderPage>()};
           if (tree_header_data->root_page_id_ != check_root_id) {
-            new_root_g_w.Drop();
             bpm_->DeletePage(new_root_id);
             check_root_id = tree_header_data->root_page_id_;
             return false;
           }
           // Update root.
-          auto new_root_data{new_root_g_w.AsMut<InternalPage>()};
-          new_root_data->NewKvAt(0);
-          new_root_data->ModifyKvAt(0, root_data->GetLowKey(), check_root_id);
           tree_header_data->root_page_id_ = new_root_id;
         }
       }
@@ -951,7 +961,7 @@ auto BPLUSTREE_TYPE::TryDeleteRoot(page_id_t &check_root_id) -> bool {
     } else {
       auto root_data{root_page_g.As<InternalPage>()};
       BUSTUB_ASSERT(root_data->IsLevelHead(), "Invalid args.");
-      if (root_data->GetSize() != 1 || root_data->GetNextPageId() != INVALID_PAGE_ID) {
+      if (root_data->GetSize() != 0 || root_data->GetNextPageId() != INVALID_PAGE_ID) {
         check_root_id = GetRootPageId();
         return false;
       }
@@ -962,8 +972,10 @@ auto BPLUSTREE_TYPE::TryDeleteRoot(page_id_t &check_root_id) -> bool {
           check_root_id = tree_header_data->root_page_id_;
           return false;
         }
-        tree_header_data->root_page_id_ = root_data->ValueAt(0);
-        new_root_id = root_data->ValueAt(0);
+        tree_header_data->root_page_id_ = root_data->GetLowLevelHeadId();
+        new_root_id = root_data->GetLowLevelHeadId();
+        // tree_header_data->root_page_id_ = root_data->ValueAt(0);
+        // new_root_id = root_data->ValueAt(0);
       }
       qsbr_mgr_.Retire(std::move(check_root_id));  // NOLINT
     }
@@ -1001,43 +1013,42 @@ auto BPLUSTREE_TYPE::BackfixInsertKv(WritePageGuard &page_g, IndexKvPack &backfi
   return ret;
 }
 
-/**
- * Todo.
- */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::BackfixRemoveKv(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool {
   auto &[backfix_key, backfix_val, is_level_head, new_level_head_id]{backfix_kv.value()};
-  GoSibUntilCoverWW(page_g, backfix_key);
   BUSTUB_ASSERT(!page_g.As<BPlusTreePage>()->IsLeafPage(), "Invalid args.");
-  auto page_data{page_g.AsMut<InternalPage>()};
 
-  int check_idx{page_data->FindKv(backfix_key, backfix_val, comparator_)};
-  while (check_idx == page_data->GetSize() && page_data->GetNextPageId() != INVALID_PAGE_ID &&
-         comparator_(page_data->GetHighKey(), backfix_key) <= 0) {
-    page_id_t next_id{page_data->GetNextPageId()};
+  GoSibUntilCoverWW(page_g, backfix_key);
+  auto page_data{page_g.AsMut<InternalPage>()};
+  int lowerbound_idx{page_data->FindIndexLowerbound(backfix_key, comparator_)};
+  while (lowerbound_idx == page_data->GetSize() && page_data->GetNextPageId() != INVALID_PAGE_ID) {
+    page_id_t sib_id{page_data->GetNextPageId()};
     page_g.Drop();
-    page_g = bpm_->WritePage(next_id);
+    page_g = bpm_->WritePage(sib_id);
+    GoSibUntilCoverWW(page_g, backfix_key);
     page_data = page_g.AsMut<InternalPage>();
-    check_idx = page_data->FindKv(backfix_key, backfix_val, comparator_);
+    lowerbound_idx = page_data->FindIndexLowerbound(backfix_key, comparator_);
   }
+
+  BUSTUB_ASSERT(lowerbound_idx != page_data->GetSize(), "Unexpected.");
+  BUSTUB_ASSERT(comparator_(page_data->KeyAt(0), backfix_key) == 0, "Unexpected.");
 
   {
     WritePageGuard check_page_g{bpm_->WritePage(backfix_val)};
     auto check_page_header_data{check_page_g.AsMut<BPlusTreePage>()};
-    if (check_page_header_data->GetBackfixStatus() != BackfixStatus::NEED_UNLINK) {
-      BUSTUB_ASSERT(false, "Protocol error.");
-    }
-    BUSTUB_ASSERT(check_idx < page_data->GetSize(), "Protocol error.");
-    page_data->DeleteKvAt(check_idx);
-
-    if (is_level_head && check_page_header_data->IsLevelHead()) {
-      // This level head should be updated.
-      // This page is able to be non-level-head.
-      page_data->SetLowLevelHeadId(new_level_head_id);
-    }
-
+    BUSTUB_ASSERT(check_page_header_data->GetBackfixStatus() == BackfixStatus::NEED_UNLINK, "Protocol error.");
+    page_data->DeleteKvAt(lowerbound_idx);
     check_page_header_data->SetBackfixStatus(BackfixStatus::IS_UNLINKED);
   }
+
+  if (is_level_head) {  // Level head mechanisim.
+    WritePageGuard check_page_g{bpm_->WritePage(new_level_head_id)};
+    auto check_page_header_data{check_page_g.AsMut<BPlusTreePage>()};
+    if (check_page_header_data->IsLevelHead()) {
+      page_data->SetLowLevelHeadId(check_page_g.GetPageId());
+    }
+  }
+
   TryMergeAndGo(page_g, backfix_kv);
 
   return true;

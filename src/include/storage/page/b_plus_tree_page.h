@@ -122,7 +122,7 @@ class BPlusTreePage {
   auto IsOverflowed() const -> bool;
 
   /**
-   *Merge 会导致 Overflow，
+   * Merge 会导致 Overflow，
    * 则不允许 Merge.
    */
   auto IsOverflowedAfterMergeWith(WritePageGuard &rpage_g) const -> bool;
