@@ -39,8 +39,10 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::Init(int max_size) {
   SetPageType(IndexPageType::LEAF_PAGE);
   SetNextPageId(INVALID_PAGE_ID);
   SetLowKey(KeyType{});
-  // 此处的 Status 设置是为了兼容 `TryNewRoot` 扩展 Root.
+  // ?
   SetBackfixStatus(BackfixStatus::IS_LINKED);
+  SetIsLevelHead(false);
+  SetLowLevelHeadId(INVALID_PAGE_ID);
 }
 
 /*

@@ -39,6 +39,8 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
   SetNextPageId(INVALID_PAGE_ID);
   SetLowKey(KeyType{});
   SetBackfixStatus(BackfixStatus::IS_LINKED);
+  SetIsLevelHead(false);
+  SetLowLevelHeadId(INVALID_PAGE_ID);
 }
 /**
  * @brief Helper method to get/set the key associated with input "index"(a.k.a

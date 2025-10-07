@@ -103,6 +103,19 @@ class BPlusTreePage {
   void SetIsLevelHead(bool is_level_head);
 
   /**
+   * 对 Level Head Node 的特殊机制.
+   * 指向 [-inf, ...) 区间, 此 Node 在当前节点无 kv 对应.
+   *
+   * 关于 `lowkey_`, Level Head Node 没有 `lowkey_`,
+   * 不以正常方式 link 在 parent 中.
+   *
+   * 非 Level Head Node 保留 `low_level_head_id_` Slot,
+   * 以便在从左向右的 Merge 中继承来自旧 Level Head 的字段.
+   */
+  auto GetLowLevelHeadId() const -> page_id_t;
+  void SetLowLevelHeadId(page_id_t low_level_head_id);
+
+  /**
    * 只有在 `Is{Over, Under}flowedWith` 返回 `false` 时,
    * 才应该采取 Split/Merge.
    */
@@ -124,12 +137,12 @@ class BPlusTreePage {
    */
  private:
   // Member variables, attributes that both internal and leaf page share
-  IndexPageType page_type_;
+  IndexPageType page_type_{IndexPageType::INVALID_INDEX_PAGE};
   /**
    * Number of key & value pairs in a page
    * 无论什么类型节点, 都指示当前已有的 key 数量.
    */
-  int size_;
+  int size_{};
   /**
    * Max number of key & value pairs in a page
    * 无论什么类型节点, 都指示最大的 key 数量.
@@ -163,6 +176,18 @@ class BPlusTreePage {
    * 应继续尝试 Merge.
    */
   bool is_level_head_;
+
+  /**
+   * 若向下遍历时 `upperbound_idx == 0` 则前往此 page.
+   * 只有 Level head 才能设置此字段.
+   *
+   * 由于向右合并,
+   * 若被合并的是其 Level 的 head,
+   * 则需要在 backfix 过程中更新此 id 为新的 Level head.
+   * 且这个过程必须和 `DeleteKvAt` 是原子的.
+   * > 在修改此字段前, 二次校验新的 id 是否是 level head.
+   */
+  page_id_t low_level_head_id_;
 
   /**
    * BPlusTreePage 不需要额外的锁,

@@ -93,6 +93,15 @@ void BPlusTreePage::SetIsLevelHead(bool is_level_head) {
   is_level_head_ = is_level_head;
 }
 
+auto BPlusTreePage::GetLowLevelHeadId() const -> page_id_t {
+  BUSTUB_ASSERT(IsLevelHead(), "Invalid operation.");
+  return low_level_head_id_;
+}
+void BPlusTreePage::SetLowLevelHeadId(page_id_t low_level_head_id) {
+  BUSTUB_ASSERT(IsLevelHead(), "Invalid operation.");
+  low_level_head_id_ = low_level_head_id;
+}
+
 auto BPlusTreePage::IsOverflowed() const -> bool { return GetSize() >= GetMaxSize(); }
 
 /** 无法通过均分解决 Overflow. */

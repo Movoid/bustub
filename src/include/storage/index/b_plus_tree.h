@@ -1221,6 +1221,8 @@ class BPlusTree {
   struct IndexKvPackImpl {
     KeyType key_;
     page_id_t val_;
+    bool is_level_head_{};  // Used in level head update.
+    page_id_t new_level_head_id_;
   };
 
   using IndexKvPack = std::optional<IndexKvPackImpl>;
