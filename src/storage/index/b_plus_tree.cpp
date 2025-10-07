@@ -652,6 +652,9 @@ auto BPLUSTREE_TYPE::TrySplitAndGo(WritePageGuard &page_g, const KeyType &key, I
 
 /**
  * 返回 true 表示 Merge 发生.
+ *
+ * 向右合并造成的空洞严重阻碍 `GoSib*` 路由.
+ * 尝试禁止向右合并, 除非是 Level head.
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool {
