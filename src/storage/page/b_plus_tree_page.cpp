@@ -86,21 +86,18 @@ auto BPlusTreePage::GetNextPageId() const -> page_id_t { return next_page_id_; }
 
 void BPlusTreePage::SetNextPageId(page_id_t next_page_id) { next_page_id_ = next_page_id; }
 
-auto BPlusTreePage::IsLevelHead() const -> bool { return is_level_head_; }
-
-void BPlusTreePage::SetIsLevelHead(bool is_level_head) {
-  BUSTUB_ASSERT(GetSize() > 0, "Invalid operaton.");
-  is_level_head_ = is_level_head;
+auto BPlusTreePage::IsLevelHead() const -> bool {
+  BUSTUB_ASSERT(!is_level_head_ || (IsLeafPage() || low_level_head_id_ != INVALID_PAGE_ID), "Unexpected.");
+  return is_level_head_;
 }
+
+void BPlusTreePage::SetIsLevelHead(bool is_level_head) { is_level_head_ = is_level_head; }
 
 auto BPlusTreePage::GetLowLevelHeadId() const -> page_id_t {
-  BUSTUB_ASSERT(IsLevelHead(), "Invalid operation.");
+  // BUSTUB_ASSERT(low_level_head_id_ != INVALID_PAGE_ID, "Invalid operation.");
   return low_level_head_id_;
 }
-void BPlusTreePage::SetLowLevelHeadId(page_id_t low_level_head_id) {
-  // BUSTUB_ASSERT(IsLevelHead(), "Invalid operation.");
-  low_level_head_id_ = low_level_head_id;
-}
+void BPlusTreePage::SetLowLevelHeadId(page_id_t low_level_head_id) { low_level_head_id_ = low_level_head_id; }
 
 auto BPlusTreePage::IsOverflowed() const -> bool { return GetSize() >= GetMaxSize(); }
 

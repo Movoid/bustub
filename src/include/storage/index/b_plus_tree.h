@@ -1252,7 +1252,7 @@ class BPlusTree {
   auto GetValue(const KeyType &key, std::vector<ValueType> *result) -> bool;
 
   // Return the page id of the root node
-  auto GetRootPageId() -> page_id_t;
+  auto GetRootPageId() const -> page_id_t;
 
   // Index iterator
   auto Begin() -> INDEXITERATOR_TYPE;
