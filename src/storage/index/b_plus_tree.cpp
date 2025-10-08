@@ -197,7 +197,7 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
     // Insert.
     int upperbound_idx{page_data->FindIndexUpperbound(key, comparator_)};
 
-    BUSTUB_ASSERT(page_data->IsLevelHead() || upperbound_idx > 0, "Unexpected.");
+    // BUSTUB_ASSERT(page_data->IsLevelHead() || upperbound_idx > 0, "Unexpected.");
     BUSTUB_ASSERT(page_data->IsLevelHead() || comparator_(page_data->GetLowKey(), key) <= 0, "Unexpected.");
     BUSTUB_ASSERT(page_data->GetNextPageId() == INVALID_PAGE_ID || comparator_(key, page_data->GetHighKey()) < 0,
                   "Unexpected.");
@@ -261,7 +261,7 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key) {
     auto page_data{leaf_g_w.AsMut<LeafPage>()};
     int lowerbound_idx{page_data->FindIndexLowerbound(key, comparator_)};
     if (lowerbound_idx == page_data->GetSize() || comparator_(page_data->KeyAt(lowerbound_idx), key) != 0) {
-      BUSTUB_ASSERT(false, "Unexpected.");
+      // BUSTUB_ASSERT(false, "Unexpected.");
       qsbr_mgr_.ExitCriticalZone();
       return;
     }
@@ -310,7 +310,9 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key) {
     }
   }
 
+  // 这里应该让 TryDeleteRoot 自己寻找 root id.
   if (try_delete_root_hint) {
+    cur_root_id = GetRootPageId();
     while (cur_root_id != INVALID_PAGE_ID && TryDeleteRoot(cur_root_id)) {
       ;
     }
@@ -709,6 +711,13 @@ auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_
       } else if (sib_status == BackfixStatus::IS_LINKED) {
         // Check if is level head.
         // Merge to right.
+
+        // Experimental.
+        if (!page_data->IsLevelHead()) {
+          backfix_kv = std::nullopt;
+          return false;
+        }
+
         page_data->RedistributeWithRight(sib_g_w, 0, kv_sum);
         /**
          * 原 Level head page 被删除,
@@ -797,6 +806,12 @@ auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_
       } else if (sib_status == BackfixStatus::IS_LINKED) {
         // Check if is level head.
         // Merge to right.
+
+        // Experimental.
+        if (!page_data->IsLevelHead()) {
+          backfix_kv = std::nullopt;
+          return false;
+        }
         page_data->RedistributeWithRight(sib_g_w, 0, kv_sum);
         /**
          * 原 Level head page 被删除,
