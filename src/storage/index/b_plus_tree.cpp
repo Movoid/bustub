@@ -704,6 +704,7 @@ auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_
 
     case BackfixStatus::NEED_UNLINK:
     case BackfixStatus::IS_UNLINKED:
+      BUSTUB_ASSERT(sib_header_data->GetSize() == 0, "Unexpected.");
       page_header_data->SetNextPageId(sib_header_data->GetNextPageId());
       qsbr_mgr_.Retire(sib_g_w.GetPageId());
       backfix_kv = std::nullopt;
@@ -741,6 +742,7 @@ auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_
         sib_header_data->SetLowLevelHeadId(page_header_data->GetLowLevelHeadId());
       }
 
+      page_header_data->SetIsLevelHead(false);
       sib_header_data->SetIsLevelHead(true);
       page_header_data->SetBackfixStatus(BackfixStatus::NEED_UNLINK);
       qsbr_mgr_.Retire(page_g.GetPageId());
@@ -923,6 +925,23 @@ auto BPLUSTREE_TYPE::BackfixRemoveKv(WritePageGuard &page_g, IndexKvPack &backfi
   GoSibUntilCoverWW(page_g, backfix_key);
   auto page_data{page_g.AsMut<InternalPage>()};
   int lowerbound_idx{page_data->FindIndexLowerbound(backfix_key, comparator_)};
+  int upperbound_idx{page_data->FindIndexUpperbound(backfix_key, comparator_)};
+  if (upperbound_idx - lowerbound_idx > 1) {
+    if (is_level_head) {
+      for (int i = lowerbound_idx; i < upperbound_idx; i++) {
+        if (page_data->ValueAt(lowerbound_idx) == new_level_head_id) {
+          break;
+        }
+      }
+    } else {
+      for (int i = lowerbound_idx; i < upperbound_idx; i++) {
+        if (page_data->ValueAt(lowerbound_idx) == backfix_val) {
+          break;
+        }
+      }
+    }
+  }
+  // 找不到应该尝试向 Sibling 走.
   while (lowerbound_idx == page_data->GetSize() && page_data->GetNextPageId() != INVALID_PAGE_ID) {
     page_id_t sib_id{page_data->GetNextPageId()};
     page_g.Drop();
@@ -930,7 +949,25 @@ auto BPLUSTREE_TYPE::BackfixRemoveKv(WritePageGuard &page_g, IndexKvPack &backfi
     GoSibUntilCoverWW(page_g, backfix_key);
     page_data = page_g.AsMut<InternalPage>();
     lowerbound_idx = page_data->FindIndexLowerbound(backfix_key, comparator_);
+    upperbound_idx = page_data->FindIndexUpperbound(backfix_key, comparator_);
+    if (upperbound_idx - lowerbound_idx > 1) {
+      if (is_level_head) {
+        for (int i = lowerbound_idx; i < upperbound_idx; i++) {
+          if (page_data->ValueAt(lowerbound_idx) == new_level_head_id) {
+            break;
+          }
+        }
+      } else {
+        for (int i = lowerbound_idx; i < upperbound_idx; i++) {
+          if (page_data->ValueAt(lowerbound_idx) == backfix_val) {
+            break;
+          }
+        }
+      }
+    }
   }
+
+  // BUSTUB_ASSERT(upperbound_idx - lowerbound_idx == 1, "Unexpected.");
 
   BUSTUB_ASSERT(lowerbound_idx != page_data->GetSize(), "Unexpected.");
   BUSTUB_ASSERT(comparator_(page_data->KeyAt(lowerbound_idx), backfix_key) == 0, "Unexpected.");
