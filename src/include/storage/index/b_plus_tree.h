@@ -1296,8 +1296,9 @@ class BPlusTree {
    * Update: 只能由 TrySplit/TryMerge 调用.
    * 因为只有 TryMerge 才有相关节点的详细信息, 才能更准确判断何时 DeleteRoot.
    */
-  auto TryNewRoot(page_id_t &check_root_id, int new_level) -> bool;
-  auto TryDeleteRoot(page_id_t &check_root_id) -> bool;
+  auto TryNewRoot(page_id_t &new_root_id) -> bool;
+  auto TryDeleteRoot(page_id_t &new_root_id) -> bool;
+  auto TryUpdateRoot(page_id_t &new_root_id) -> bool;
 
   auto BackfixInsertKv(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool;
 

@@ -129,9 +129,6 @@ class BPlusTreePage {
 
   auto IsUnderflowed() const -> bool;
 
-  // /** 无法通过均分解决 Underflow. */
-  // auto IsUnderflowedWith(WritePageGuard &rpage_g) const -> bool;
-
   /*
    * TODO(P2): Remove __attribute__((__unused__)) if you intend to use the fields.
    */

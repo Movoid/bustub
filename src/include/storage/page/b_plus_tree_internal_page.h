@@ -102,14 +102,6 @@ class BPlusTreeInternalPage : public BPlusTreePage {
   void Init(int max_size = INTERNAL_PAGE_SLOT_CNT_MAX);
 
   auto KeyAt(int index) const -> const KeyType &;
-  void SetKeyAt(int index, const KeyType &key);
-
-  /**
-   * @param value The value to search for
-   * @return The index that corresponds to the specified value
-   */
-  auto ValueIndex(const ValueType &value) const -> int;
-
   auto ValueAt(int index) const -> const ValueType &;
 
   /**
@@ -152,12 +144,6 @@ class BPlusTreeInternalPage : public BPlusTreePage {
   auto FindIndexUpperbound(const KeyType &key, KeyComparator &cmp) const -> int;
 
   auto FindIndexLowerbound(const KeyType &key, KeyComparator &cmp) const -> int;
-
-  /**
-   * 找明确 KV Pair.
-   * 在需要删除明确的 KV Pair 时用于检查 Slot.
-   */
-  auto FindKv(const KeyType &key, const ValueType &val, KeyComparator &cmp) const -> int;
 
   void NewKvAt(int index);
   void ModifyKvAt(int index, const KeyType &key, const ValueType &val);

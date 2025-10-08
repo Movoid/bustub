@@ -40,7 +40,7 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::Init(int max_size) {
   SetNextPageId(INVALID_PAGE_ID);
   SetLowKey(KeyType{});
   // ?
-  SetBackfixStatus(BackfixStatus::IS_LINKED);
+  SetBackfixStatus(BackfixStatus::INVALID);
   SetIsLevelHead(false);
   SetLowLevelHeadId(INVALID_PAGE_ID);
 }
@@ -53,12 +53,6 @@ INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_LEAF_PAGE_TYPE::KeyAt(int index) const -> const KeyType & {
   BUSTUB_ASSERT(0 <= index && index < GetSize(), "Invalid args.");
   return key_array_[index];
-}
-
-INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_LEAF_PAGE_TYPE::SetKeyAt(int index, const KeyType &key) {
-  BUSTUB_ASSERT(0 <= index && index < GetSize(), "Invalid args.");
-  key_array_[index] = key;
 }
 
 INDEX_TEMPLATE_ARGUMENTS
@@ -96,19 +90,17 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::SetLowKey(const KeyType &low_key) {
  * LeafNode 的 `high_key_` 是 exclusive upperbound.
  * 即, 当前 Node 不包括 `high_key_`.
  *
- * 注意! `GetSize() == 0` 的节点不可复用,
- * 否则导致 Use After Free.
+ * 不允许复用 IS_UNLINKED/NEED_UNLINK 节点,
+ * 其他的 `GetSize() == 0` 节点允许复用.
  *
  * 除了最右侧节点, 其他所有节点都不允许设置 `high_key_is_valid_ == false`,
  * 否则可能对空节点错误判断为 `CoveredKey() == true`.
- *
- * WARNING: 存在问题.
- * 若当前 Leaf 是最右侧节点且发生 Merge,
- * 其 `HasValidHighKey() == false` 误导了 `GoSib*` 留在当前节点.
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_LEAF_PAGE_TYPE::CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool {
-  return GetNextPageId() == INVALID_PAGE_ID || (GetSize() && cmp(key, GetHighKey()) < 0);
+  return GetNextPageId() == INVALID_PAGE_ID ||
+         ((GetBackfixStatus() != BackfixStatus::IS_UNLINKED && GetBackfixStatus() != BackfixStatus::NEED_UNLINK) &&
+          cmp(key, GetHighKey()) < 0);
 }
 
 INDEX_TEMPLATE_ARGUMENTS

@@ -107,8 +107,6 @@ class BPlusTreeLeafPage : public BPlusTreePage {
 
   // Helper methods
   auto KeyAt(int index) const -> const KeyType &;
-  void SetKeyAt(int index, const KeyType &key);
-
   auto ValueAt(int index) const -> const ValueType &;
 
   /**

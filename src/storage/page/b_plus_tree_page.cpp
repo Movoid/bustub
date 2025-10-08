@@ -78,7 +78,9 @@ auto BPlusTreePage::GetBackfixStatus() const -> BackfixStatus {
 }
 
 void BPlusTreePage::SetBackfixStatus(BackfixStatus status) {
-  // BUSTUB_ASSERT(status != BackfixStatus::INVALID, "Protocol error.");
+  BUSTUB_ASSERT(backfix_status_ != BackfixStatus::IS_UNLINKED, "Protocol error.");
+  BUSTUB_ASSERT(backfix_status_ != BackfixStatus::NEED_UNLINK || status == BackfixStatus::IS_UNLINKED,
+                "Protocol error.");
   backfix_status_ = status;
 }
 

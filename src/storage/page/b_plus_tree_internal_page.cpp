@@ -38,7 +38,7 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
   SetPageType(IndexPageType::INTERNAL_PAGE);
   SetNextPageId(INVALID_PAGE_ID);
   SetLowKey(KeyType{});
-  SetBackfixStatus(BackfixStatus::IS_LINKED);
+  SetBackfixStatus(BackfixStatus::INVALID);
   SetIsLevelHead(false);
   SetLowLevelHeadId(INVALID_PAGE_ID);
 }
@@ -53,18 +53,6 @@ INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::KeyAt(int index) const -> const KeyType & {
   BUSTUB_ASSERT(0 <= index && index < GetSize(), "Invalid args.");
   return key_array_[index];
-}
-
-/**
- * @brief Set key at the specified index.
- *
- * @param index The index of the key to set. Index must be non-zero.
- * @param key The new value for key
- */
-INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetKeyAt(int index, const KeyType &key) {
-  BUSTUB_ASSERT(0 <= index && index < GetSize(), "Invalid args.");
-  key_array_[index] = key;
 }
 
 /**
@@ -106,7 +94,9 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetLowKey(const KeyType &low_key) { hdr_.lo
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool {
-  return GetNextPageId() == INVALID_PAGE_ID || (GetSize() > 0 && cmp(key, GetHighKey()) <= 0);
+  return GetNextPageId() == INVALID_PAGE_ID ||
+         ((GetBackfixStatus() != BackfixStatus::IS_UNLINKED && GetBackfixStatus() != BackfixStatus::NEED_UNLINK) &&
+          cmp(key, GetHighKey()) <= 0);
 }
 
 /**
@@ -144,18 +134,6 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndexLowerbound(const KeyType &key, Key
     }
   }
   return r;
-}
-
-INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindKv(const KeyType &key, const ValueType &val, KeyComparator &cmp) const -> int {
-  int lowerbound_idx{FindIndexLowerbound(key, cmp)};
-  int upperbound_idx{FindIndexUpperbound(key, cmp)};
-  for (int i = lowerbound_idx; i < upperbound_idx; i++) {
-    if (ValueAt(i) == val) {
-      return i;
-    }
-  }
-  return GetSize();
 }
 
 INDEX_TEMPLATE_ARGUMENTS
