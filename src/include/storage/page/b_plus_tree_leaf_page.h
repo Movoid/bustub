@@ -147,8 +147,8 @@ class BPlusTreeLeafPage : public BPlusTreePage {
    * 和 InternalNode 不同,
    * LeafNode 的 `high_key_` 是 exclusive upperbound.
    *
-   * 必须跳过空节点, 不允许复用空节点.
-   * Level 内的空节点最后会被 Level head node 全部 Merge.
+   * **绝对禁止** 复用 `IS_UNLINKED`/`NEED_UNLINK` 节点,
+   * 此类节点必须返回 `false`.
    */
   auto CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool;
 

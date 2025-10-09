@@ -138,7 +138,10 @@ class BPlusTreeInternalPage : public BPlusTreePage {
 
   auto GetLowKey() const -> const KeyType &;
   void SetLowKey(const KeyType &key);
-
+  /**
+   * **绝对禁止** 复用 `IS_UNLINKED`/`NEED_UNLINK` 节点,
+   * 此类节点必须返回 `false`.
+   */
   auto CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool;
 
   auto FindIndexUpperbound(const KeyType &key, KeyComparator &cmp) const -> int;

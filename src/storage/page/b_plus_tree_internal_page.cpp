@@ -94,9 +94,11 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetLowKey(const KeyType &low_key) { hdr_.lo
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool {
-  return GetNextPageId() == INVALID_PAGE_ID ||
-         ((GetBackfixStatus() != BackfixStatus::IS_UNLINKED && GetBackfixStatus() != BackfixStatus::NEED_UNLINK) &&
-          cmp(key, GetHighKey()) <= 0);
+  auto status{GetBackfixStatus()};
+  if (status == BackfixStatus::IS_UNLINKED || status == BackfixStatus::NEED_UNLINK) {
+    return false;
+  }
+  return GetNextPageId() == INVALID_PAGE_ID || cmp(key, GetHighKey()) <= 0;
 }
 
 /**
