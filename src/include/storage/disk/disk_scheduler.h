@@ -47,7 +47,7 @@ struct DiskRequest {
   std::promise<bool> callback_;
 
   /**  Dependency task. */
-  std::optional<std::future<bool>> dependency_{std::nullopt};
+  [[maybe_unused]] std::optional<std::future<bool>> dependency_{std::nullopt};
 };
 
 /**

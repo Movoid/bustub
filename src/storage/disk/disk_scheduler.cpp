@@ -76,6 +76,10 @@ void DiskScheduler::Schedule(DiskRequest r) {
 
     {
       std::lock_guard<std::mutex> awaited_lk{awaited_m_};
+      /**
+       * `queues_[page_id].second == true` 标记有线程正在处理此 page queue,
+       * 不要向 `awaited_` 添加 token.
+       */
       if (queues_[page_id].first.empty() && !queues_[page_id].second) {
         awaited_.emplace(page_id);
         cond_.notify_one();
@@ -133,6 +137,7 @@ void DiskScheduler::StartWorkerThread() {
       {
         std::lock_guard<std::mutex> queues_lk{queues_m_};
         if (queues_[cur_page_id].first.empty()) {
+          // 标记线程退出处理此 page queue.
           queues_[cur_page_id].second = false;  // This position is important.
           break;
         }

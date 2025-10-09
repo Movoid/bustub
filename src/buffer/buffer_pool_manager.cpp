@@ -229,7 +229,7 @@ auto BufferPoolManager::NewPage() -> page_id_t {
      * 此处存在 Race Window,
      * 可能有另一个线程将此来自 `Evict` 的 page pinned.
      * 对于来自 `free_list_` 的 frame, 其不可能还有其他线程正在使用.
-     * 所以二次检查只需要判断
+     * 所以二次检查只需要判断 pin.
      */
     {
       std::lock_guard<std::shared_mutex> frame_guard{frames_[frame_id]->rwlatch_};
@@ -386,7 +386,7 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
       }
     }
 
-    if (is_acquired) {
+    if (is_acquired) {  // 从 `AcquireNewFrameUnsafe` 获得 frame.
       {
         std::lock_guard<std::shared_mutex> frame_guard{frames_[frame_id]->rwlatch_};
         FrameHeader &frame{*frames_[frame_id]};
@@ -404,7 +404,11 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
             continue;
           }
           frame_id_t check_id{FindFrameUnsafe(page_id)};
-          if (check_id != INVALID_FRAME_ID && check_id != frame_id) {
+          /**
+           * 如果 `check_id == INVALID_FRAME_ID` 则 page 不在 memory 中.
+           * 否则已经抢先被其他线程载入 memory.
+           */
+          if (check_id != INVALID_FRAME_ID) {
             if (frame.page_id_ == INVALID_PAGE_ID) {  // 来自 `free_frames_`
               free_frames_.emplace_back(frame_id);
             } else {  // 来自 Evict
@@ -495,7 +499,7 @@ auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_typ
           }
           // 防止当前 page 已经被另一线程换入到已有的 frame 里
           frame_id_t check_id{FindFrameUnsafe(page_id)};
-          if (check_id != INVALID_FRAME_ID && check_id != frame_id) {
+          if (check_id != INVALID_FRAME_ID) {
             if (frame.page_id_ == INVALID_PAGE_ID) {  // 来自 `free_frames_`
               free_frames_.emplace_back(frame_id);
             } else {  // 来自 Evict
