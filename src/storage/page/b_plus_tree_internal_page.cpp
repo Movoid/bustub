@@ -33,14 +33,15 @@ namespace bustub {
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
   BUSTUB_ASSERT(max_size > 0 && static_cast<std::uint64_t>(max_size) <= INTERNAL_PAGE_SLOT_CNT_MAX, "Invalid init.");
+  SetPageType(IndexPageType::INTERNAL_PAGE);
   SetSize(0);
   SetMaxSize(max_size);
-  SetPageType(IndexPageType::INTERNAL_PAGE);
-  SetNextPageId(INVALID_PAGE_ID);
-  SetLowKey(KeyType{});
+  SetLevel(-1);
   SetBackfixStatus(BackfixStatus::INVALID);
+  SetNextPageId(INVALID_PAGE_ID);
   SetIsLevelHead(false);
   SetLowLevelHeadId(INVALID_PAGE_ID);
+  SetLowKey(KeyType{});
 }
 /**
  * @brief Helper method to get/set the key associated with input "index"(a.k.a

@@ -34,15 +34,15 @@ namespace bustub {
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_LEAF_PAGE_TYPE::Init(int max_size) {
   BUSTUB_ASSERT(max_size > 0 && static_cast<std::uint64_t>(max_size) <= LEAF_PAGE_SLOT_CNT_MAX, "Invalid init.");
+  SetPageType(IndexPageType::LEAF_PAGE);
   SetSize(0);
   SetMaxSize(max_size);
-  SetPageType(IndexPageType::LEAF_PAGE);
-  SetNextPageId(INVALID_PAGE_ID);
-  SetLowKey(KeyType{});
-  // ?
+  SetLevel(1);
   SetBackfixStatus(BackfixStatus::INVALID);
+  SetNextPageId(INVALID_PAGE_ID);
   SetIsLevelHead(false);
   SetLowLevelHeadId(INVALID_PAGE_ID);
+  SetLowKey(KeyType{});
 }
 
 /*

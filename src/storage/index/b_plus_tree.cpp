@@ -13,6 +13,9 @@
 #include "storage/index/b_plus_tree.h"
 #include "storage/index/b_plus_tree_debug.h"
 
+#define CUSTOM_LOG
+#include "common/custom_debug.h"
+
 namespace bustub {
 /**
  * 构造函数
@@ -624,7 +627,8 @@ auto BPLUSTREE_TYPE::TrySplitAndGo(WritePageGuard &page_g, const KeyType &key, I
   if (page_header_data->IsLeafPage()) {
     auto page_data{page_g.AsMut<LeafPage>()};
     {
-      WritePageGuard new_sib_g_w{bpm_->WritePage(bpm_->NewPage())};
+      page_id_t new_sib_id{bpm_->NewPage()};
+      WritePageGuard new_sib_g_w{bpm_->WritePage(new_sib_id)};
       auto new_sib_data{new_sib_g_w.AsMut<LeafPage>()};
       new_sib_data->Init(leaf_max_size_);
       int kv_sum{page_data->GetSize() + new_sib_data->GetSize()};
@@ -643,7 +647,8 @@ auto BPLUSTREE_TYPE::TrySplitAndGo(WritePageGuard &page_g, const KeyType &key, I
   } else {
     auto page_data{page_g.AsMut<InternalPage>()};
     {
-      WritePageGuard new_sib_g_w{bpm_->WritePage(bpm_->NewPage())};
+      page_id_t new_sib_id{bpm_->NewPage()};
+      WritePageGuard new_sib_g_w{bpm_->WritePage(new_sib_id)};
       auto new_sib_data{new_sib_g_w.AsMut<InternalPage>()};
       new_sib_data->Init(internal_max_size_);
       int kv_sum{page_data->GetSize() + new_sib_data->GetSize()};
@@ -713,7 +718,6 @@ auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_
     case BackfixStatus::IS_UNLINKED:
       BUSTUB_ASSERT(sib_header_data->GetSize() == 0, "Unexpected.");
       page_header_data->SetNextPageId(sib_header_data->GetNextPageId());
-      // qsbr_mgr_.Retire(sib_g_w.GetPageId());
       backfix_kv = std::nullopt;
       break;
 
@@ -769,7 +773,6 @@ auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_
        * 因为其仍被其 parent `low_level_head_id_` 连接.
        * 在对 parent 的 BackfixRemoveKv 中 Retire.
        */
-      // qsbr_mgr_.Retire(page_g.GetPageId());
       page_g = std::move(sib_g_w);
       break;
 
@@ -817,7 +820,11 @@ auto BPLUSTREE_TYPE::TryNewRoot(page_id_t &new_root_id) -> bool {
     {
       ReadPageGuard expected_root_g{bpm_->ReadPage(expected_root_id)};
       auto expected_root_header_data{expected_root_g.As<BPlusTreePage>()};
-      if (!expected_root_header_data->IsLevelHead() || expected_root_header_data->GetNextPageId() == INVALID_PAGE_ID) {
+      /**
+       * `expected_root` 必须是 `IS_LINKED`.
+       */
+      if (expected_root_header_data->GetBackfixStatus() != BackfixStatus::IS_LINKED ||
+          !expected_root_header_data->IsLevelHead() || expected_root_header_data->GetNextPageId() == INVALID_PAGE_ID) {
         desired_root_g_w.Drop();
         bpm_->DeletePage(desired_root_id);
         new_root_id = GetRootPageId();
