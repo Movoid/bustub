@@ -279,6 +279,9 @@ auto BufferPoolManager::NewPage() -> page_id_t {
  * 删除 page, 需要删除 disk 上的数据.
  */
 auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
+  if (page_id == INVALID_PAGE_ID) {
+    throw Exception{"Invalid args."};
+  }
   while (true) {
     frame_id_t frame_id{INVALID_FRAME_ID};
     {
@@ -357,6 +360,9 @@ auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
  * returns `std::nullopt`, otherwise returns a `WritePageGuard` ensuring exclusive and mutable access to a page's data.
  */
 auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_type) -> std::optional<WritePageGuard> {
+  if (page_id == INVALID_PAGE_ID) {
+    return std::nullopt;
+  }
   while (true) {
     frame_id_t frame_id{INVALID_FRAME_ID};
     page_id_t old_page_id{INVALID_PAGE_ID};
@@ -448,6 +454,9 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
  * returns `std::nullopt`, otherwise returns a `ReadPageGuard` ensuring shared and read-only access to a page's data.
  */
 auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_type) -> std::optional<ReadPageGuard> {
+  if (page_id == INVALID_PAGE_ID) {
+    return std::nullopt;
+  }
   while (true) {
     frame_id_t frame_id{INVALID_FRAME_ID};
     page_id_t old_page_id{INVALID_PAGE_ID};
@@ -583,6 +592,9 @@ auto BufferPoolManager::ReadPage(page_id_t page_id, AccessType access_type) -> R
  * 前提是没有其他函数尝试嵌套 BufferPoolManager `bpm_latch_` + FrameHeader `rwlatch_`.
  */
 auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool {
+  if (page_id == INVALID_PAGE_ID) {
+    throw Exception{"Invalid args."};
+  }
   frame_id_t frame_id{INVALID_FRAME_ID};
   {
     std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
