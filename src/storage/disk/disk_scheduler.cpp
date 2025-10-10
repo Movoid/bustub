@@ -65,9 +65,14 @@ void DiskScheduler::Schedule(DiskRequest r) {
     if (r.is_write_) {
       auto old_buf{temp_flush_buffer_[r.page_id_]};
       if (old_buf == nullptr) {
-        std::memcpy(new_buf, r.data_, BUSTUB_PAGE_SIZE);
+        if (r.data_ == nullptr) {
+          std::memset(new_buf, 0, BUSTUB_PAGE_SIZE);
+        } else {
+          std::memcpy(new_buf, r.data_, BUSTUB_PAGE_SIZE);
+        }
         temp_flush_buffer_[r.page_id_] = new_buf;
       } else {
+        BUSTUB_ASSERT(r.data_ != nullptr, "Unexpected.");
         std::memcpy(old_buf, r.data_, BUSTUB_PAGE_SIZE);
         fb_.Push(new_buf);
       }

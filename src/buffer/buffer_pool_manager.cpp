@@ -245,7 +245,19 @@ auto BufferPoolManager::FindFrameUnsafe(page_id_t page_id) -> frame_id_t {
  *
  * @return The page ID of the newly allocated page.
  */
-auto BufferPoolManager::NewPage() -> page_id_t { return next_page_id_.fetch_add(1, std::memory_order_relaxed); }
+auto BufferPoolManager::NewPage() -> page_id_t {
+  /**
+   * 必须调用 `DiskManager` 的 `WritePage`.
+   * 否则 `ReadPage` 报错 page not in range.
+   */
+  page_id_t new_page_id{next_page_id_.fetch_add(1, std::memory_order_relaxed)};
+
+  auto p{disk_scheduler_->CreatePromise()};
+  DiskRequest req{true, nullptr, new_page_id, std::move(p), std::nullopt};
+  disk_scheduler_->Schedule(std::move(req));
+
+  return new_page_id;
+}
 
 /**
  * @brief Removes a page from the database, both on disk and in memory.
