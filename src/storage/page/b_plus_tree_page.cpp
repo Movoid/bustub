@@ -95,7 +95,7 @@ auto BPlusTreePage::IsLevelHead() const -> bool {
 
 void BPlusTreePage::SetIsLevelHead(bool is_level_head) { is_level_head_ = is_level_head; }
 
-auto BPlusTreePage::GetLowLevelHeadId() const -> page_id_t {
+auto BPlusTreePage::GetLowLevelHeadId() const -> const page_id_t & {
   // BUSTUB_ASSERT(low_level_head_id_ != INVALID_PAGE_ID, "Invalid operation.");
   return low_level_head_id_;
 }
@@ -106,7 +106,6 @@ auto BPlusTreePage::IsOverflowed() const -> bool { return GetSize() >= GetMaxSiz
 /** 无法通过均分解决 Overflow. */
 auto BPlusTreePage::IsOverflowedAfterMergeWith(WritePageGuard &rpage_g) const -> bool {
   int cnt_sum{GetSize() + rpage_g.As<BPlusTreePage>()->GetSize()};
-  /** Ceil. */
   return cnt_sum > GetMaxSize();
 }
 

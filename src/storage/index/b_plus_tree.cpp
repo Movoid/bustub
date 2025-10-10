@@ -757,7 +757,8 @@ auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_
         if (sib_header_data->GetLowLevelHeadId() == INVALID_PAGE_ID) {
           sib_header_data->SetLowLevelHeadId(page_header_data->GetLowLevelHeadId());
         } else {
-          qsbr_mgr_.Retire(page_header_data->GetLowLevelHeadId());
+          page_id_t low_id{page_header_data->GetLowLevelHeadId()};
+          qsbr_mgr_.Retire(std::move(low_id));  // NOLINT
         }
       }
 
@@ -970,14 +971,14 @@ auto BPLUSTREE_TYPE::BackfixRemoveKv(WritePageGuard &page_g, IndexKvPack &backfi
   int upperbound_idx{page_data->FindIndexUpperbound(backfix_key, comparator_)};
   if (upperbound_idx - lowerbound_idx > 1) {
     if (is_level_head) {
-      for (int i = lowerbound_idx; i < upperbound_idx; i++) {
-        if (page_data->ValueAt(i) == new_level_head_id) {
+      for (; lowerbound_idx < upperbound_idx; lowerbound_idx++) {
+        if (page_data->ValueAt(lowerbound_idx) == new_level_head_id) {
           break;
         }
       }
     } else {
-      for (int i = lowerbound_idx; i < upperbound_idx; i++) {
-        if (page_data->ValueAt(i) == backfix_val) {
+      for (; lowerbound_idx < upperbound_idx; lowerbound_idx++) {
+        if (page_data->ValueAt(lowerbound_idx) == backfix_val) {
           break;
         }
       }
@@ -994,14 +995,14 @@ auto BPLUSTREE_TYPE::BackfixRemoveKv(WritePageGuard &page_g, IndexKvPack &backfi
     upperbound_idx = page_data->FindIndexUpperbound(backfix_key, comparator_);
     if (upperbound_idx - lowerbound_idx > 1) {
       if (is_level_head) {
-        for (int i = lowerbound_idx; i < upperbound_idx; i++) {
-          if (page_data->ValueAt(i) == new_level_head_id) {
+        for (; lowerbound_idx < upperbound_idx; lowerbound_idx++) {
+          if (page_data->ValueAt(lowerbound_idx) == new_level_head_id) {
             break;
           }
         }
       } else {
-        for (int i = lowerbound_idx; i < upperbound_idx; i++) {
-          if (page_data->ValueAt(i) == backfix_val) {
+        for (; lowerbound_idx < upperbound_idx; lowerbound_idx++) {
+          if (page_data->ValueAt(lowerbound_idx) == backfix_val) {
             break;
           }
         }

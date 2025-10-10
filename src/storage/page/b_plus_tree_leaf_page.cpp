@@ -175,6 +175,9 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::DeleteKvAt(int index) {
  * 此函数需要优化. Todo.
  * 实际只会有两种操作, Split 和 Merge.
  * 不存在均分操作.
+ *
+ * WARNING: 如果左侧只有 1 个 kv, 尝试向右 Split,
+ * 将造成右侧节点 lowkey 错误.
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_LEAF_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage_g_w, int l_size, int r_size) {

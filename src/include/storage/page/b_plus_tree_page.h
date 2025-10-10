@@ -112,7 +112,7 @@ class BPlusTreePage {
    * 非 Level Head Node 保留 `low_level_head_id_` Slot,
    * 以便在从左向右的 Merge 中继承来自旧 Level Head 的字段.
    */
-  auto GetLowLevelHeadId() const -> page_id_t;
+  auto GetLowLevelHeadId() const -> const page_id_t &;
   void SetLowLevelHeadId(page_id_t low_level_head_id);
 
   /**
