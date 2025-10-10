@@ -13,8 +13,8 @@
 #include "storage/index/b_plus_tree.h"
 #include "storage/index/b_plus_tree_debug.h"
 
-#define CUSTOM_LOG
-#include "common/custom_debug.h"
+// #define CUSTOM_LOG
+// #include "common/custom_debug.h"
 
 namespace bustub {
 /**
@@ -365,7 +365,8 @@ auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE {
   BUSTUB_ASSERT(page_g.As<BPlusTreePage>()->IsLeafPage(), "Unexpected.");
 
   auto page_data{page_g.As<LeafPage>()};
-  while (page_data->GetSize() == 0 && page_data->GetNextPageId() != INVALID_PAGE_ID) {
+  while (!page_data->IsLevelHead() && page_data->GetNextPageId() != INVALID_PAGE_ID) {
+    BUSTUB_ASSERT(page_data->GetSize() == 0, "Unexpected.");
     page_id_t sib_id{page_data->GetNextPageId()};
     page_g.Drop();
     page_g = bpm_->ReadPage(sib_id);
