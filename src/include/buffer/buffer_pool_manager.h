@@ -164,10 +164,8 @@ class BufferPoolManager {
   auto ReadPage(page_id_t page_id, AccessType access_type = AccessType::Unknown) -> ReadPageGuard;
   auto FlushPage(page_id_t page_id) -> bool;
   void FlushAllPages();
-  auto GetPinCount(page_id_t page_id) -> std::optional<size_t>;
 
-  auto PinPage(page_id_t page_id) -> bool;
-  auto UnpinPage(page_id_t page_id) -> bool;
+  auto GetPinCount(page_id_t page_id) -> std::optional<size_t>;
 
   void SetCallbackOnDestroyUnsafe(const std::function<void()> &func);
 
@@ -178,8 +176,8 @@ class BufferPoolManager {
   auto FetchPageAsyncUnsafe(page_id_t page_id, frame_id_t frame_id) -> std::future<bool>;
   auto FlushPageAsyncUnsafe(page_id_t page_id, frame_id_t frame_id) -> std::future<bool>;
 
-  auto AcquireNewFrameUnsafe() -> frame_id_t;
-  void ReleaseNewFrameUnsafe(page_id_t old_page_id, page_id_t page_id, frame_id_t frame_id, bool set_evictable);
+  auto TryAllocateFrameUnsafe(frame_id_t &frame_id) -> bool;
+  auto TryCommitFrameUnsafe(frame_id_t &expected_frame_id, frame_id_t desired_frame_id, page_id_t page_id) -> bool;
   auto FindFrameUnsafe(page_id_t page_id) -> frame_id_t;
 
  private:
@@ -190,7 +188,8 @@ class BufferPoolManager {
   const size_t num_frames_;
 
   /** @brief The next page ID to be allocated.  */
-  std::atomic<page_id_t> next_page_id_{};
+  // std::atomic<page_id_t> next_page_id_{};
+  std::atomic<page_id_t> next_page_id_;
 
   /**
    * @brief The latch protecting the buffer pool's inner data structures.
@@ -204,7 +203,7 @@ class BufferPoolManager {
    *
    * TODO(P1) We recommend replacing this comment with details about what this latch actually protects.
    */
-  std::shared_ptr<std::mutex> bpm_latch_;
+  std::shared_ptr<std::shared_mutex> bpm_latch_;
 
   /** @brief The frame headers of the frames that this buffer pool manages.
    *
@@ -232,7 +231,7 @@ class BufferPoolManager {
    *
    * NOT thread-safe.
    */
-  std::list<frame_id_t> free_frames_;
+  std::vector<frame_id_t> free_frames_;
 
   /** @brief The replacer to find unpinned / candidate pages for eviction.
    *

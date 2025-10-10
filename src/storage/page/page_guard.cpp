@@ -40,7 +40,7 @@ namespace bustub {
  * @param bpm_latch A shared pointer to the buffer pool manager's latch.
  */
 ReadPageGuard::ReadPageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> frame,
-                             std::shared_ptr<LRUKReplacer> replacer, std::shared_ptr<std::mutex> bpm_latch)
+                             std::shared_ptr<LRUKReplacer> replacer, std::shared_ptr<std::shared_mutex> bpm_latch)
     : page_id_(page_id),
       frame_(std::move(frame)),
       replacer_(std::move(replacer)),
@@ -59,6 +59,7 @@ ReadPageGuard::ReadPageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> fra
   // std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
   // replacer_->RecordAccess(frame_->frame_id_);
   // }
+  replacer_->RecordAccess(frame_->frame_id_);
   is_valid_ = true;
 }
 
@@ -172,11 +173,15 @@ void ReadPageGuard::Drop() {
     // DebugLog("Failed\t\t Reader Drop of page {} : {}", page_id_, "Invalid.");
     return;
   }
-  // 在此处 `unlock_shared`, 允许其他线程读写 frame.
-  lock_holder_.unlock();
   // DebugLog("OK\t\t Reader Drop of page {}", page_id_);
+
+  /**
+   * 此处先 unlock frame lk, 再 unpin.
+   * 意味着即使拿到 frame lk, 也可能有 pin.
+   */
+  lock_holder_.unlock();
   {
-    std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
+    std::lock_guard<std::shared_mutex> bpm_guard{*bpm_latch_};
     // if (frame_->pin_count_.fetch_sub(1, std::memory_order_relaxed) == 1) {
     //   // 注意此处可能的 Race: 另一个线程访问此 frame, 并设置 false evictable.
     //   // 通过 `bpm_latch_` 阻止.
@@ -209,7 +214,7 @@ ReadPageGuard::~ReadPageGuard() { Drop(); }
  * @param bpm_latch A shared pointer to the buffer pool manager's latch.
  */
 WritePageGuard::WritePageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> frame,
-                               std::shared_ptr<LRUKReplacer> replacer, std::shared_ptr<std::mutex> bpm_latch)
+                               std::shared_ptr<LRUKReplacer> replacer, std::shared_ptr<std::shared_mutex> bpm_latch)
     : page_id_(page_id),
       frame_(std::move(frame)),
       replacer_(std::move(replacer)),
@@ -225,7 +230,7 @@ WritePageGuard::WritePageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> f
   //   std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
   //   replacer_->RecordAccess(frame_->frame_id_);
   // }
-  frame_->is_dirty_ = true;
+  replacer_->RecordAccess(frame_->frame_id_);
   is_valid_ = true;
 }
 
@@ -313,7 +318,7 @@ auto WritePageGuard::GetDataMut() -> char * {
   BUSTUB_ENSURE(is_valid_, "tried to use an invalid write guard");
 
   // DebugLog("OK\t\t Writer GetData of page {} : {}", page_id_, frame_->GetData());
-
+  frame_->is_dirty_ = true;
   return frame_->GetDataMut();
 }
 
@@ -348,10 +353,9 @@ void WritePageGuard::Drop() {
     return;
   }
   // DebugLog("OK\t\t Writer Drop of page {}", page_id_);
-
   lock_holder_.unlock();
   {
-    std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
+    std::lock_guard<std::shared_mutex> bpm_guard{*bpm_latch_};
     // if (frame_->pin_count_.fetch_sub(1, std::memory_order_relaxed) == 1) {
     //   replacer_->SetEvictable(frame_->frame_id_, true);
     // }
@@ -359,6 +363,7 @@ void WritePageGuard::Drop() {
       replacer_->SetEvictable(frame_->frame_id_, true);
     }
   }
+
   is_valid_ = false;
 }
 

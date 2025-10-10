@@ -42,8 +42,7 @@ auto FrameHeader::GetDataMut() -> char * { return data_.data(); }
 
 /**
  * @brief Resets a `FrameHeader`'s member fields.
- *
- * 除了 `pin_count_` 全部清除. `pin_count_` 和 `replacer_` 同步.
+ * `pin_count_` 作为关键数据应该手动处理.
  */
 void FrameHeader::Reset() {
   std::fill(data_.begin(), data_.end(), 0);
@@ -75,7 +74,7 @@ BufferPoolManager::BufferPoolManager(size_t num_frames, DiskManager *disk_manage
                                      LogManager *log_manager)
     : num_frames_(num_frames),
       next_page_id_(0),
-      bpm_latch_(std::make_shared<std::mutex>()),
+      bpm_latch_(std::make_shared<std::shared_mutex>()),
       replacer_(std::make_shared<LRUKReplacer>(num_frames, k_dist)),
       disk_scheduler_(std::make_unique<DiskScheduler>(disk_manager)),
       log_manager_(log_manager) {
@@ -156,6 +155,10 @@ auto BufferPoolManager::FetchPageAsyncUnsafe(page_id_t page_id, frame_id_t frame
   return fut;
 }
 
+/**
+ * `Schedule` 会对 frame data 做一份拷贝, 以实现 async.
+ * 不会修改原本 frame data.
+ */
 auto BufferPoolManager::FlushPageAsyncUnsafe(page_id_t page_id, frame_id_t frame_id) -> std::future<bool> {
   FrameHeader &frame{*frames_[frame_id]};
   auto p{disk_scheduler_->CreatePromise()};
@@ -166,34 +169,63 @@ auto BufferPoolManager::FlushPageAsyncUnsafe(page_id_t page_id, frame_id_t frame
 }
 
 /**
- * 此函数将某个 page 驱逐,
- * 但并不会将其从 metadata 中删除.
+ * 重构后, 分配一个可用的 frame.
  */
-auto BufferPoolManager::AcquireNewFrameUnsafe() -> frame_id_t {
-  frame_id_t frame_id{INVALID_FRAME_ID};
-  if (free_frames_.empty()) {  // Evict.
-    auto evicted{replacer_->Evict()};
-    if (!evicted.has_value()) {
-      return INVALID_FRAME_ID;
-    }
-    frame_id = evicted.value();
-  } else {  // Reuse.
+auto BufferPoolManager::TryAllocateFrameUnsafe(frame_id_t &frame_id) -> bool {
+  if (!free_frames_.empty()) {
     frame_id = free_frames_.back();
     free_frames_.pop_back();
+    return true;
   }
-  return frame_id;
+  auto evicted{replacer_->Evict()};
+  if (!evicted.has_value()) {
+    frame_id = INVALID_FRAME_ID;
+    return false;
+  }
+  frame_id = evicted.value();
+  FrameHeader &frame{*frames_[frame_id]};
+  /**
+   * 此处应该能独占 frame, 无需 frame 锁.
+   * 必须要求 pin 的生命周期长于 frame lk.
+   * `frame.pin_count_` 实际被 bpm lk 保护.
+   */
+  BUSTUB_ASSERT(frame.pin_count_ == 0, "Unexpected.");
+
+  /**
+   * 由 DiskScheduler 保证在此之后的 Fetch 必须获得晚于此 Flush 的数据.
+   */
+
+  /**
+   * 此处需要改进. Flush 应该在持有 frame lk 时执行.
+   */
+  if (frame.is_dirty_) {
+    FlushPageAsyncUnsafe(frame.page_id_, frame_id);
+  }
+
+  page_table_.erase(frame.page_id_);
+  frame_id = frame.frame_id_;
+  frame.Reset();
+
+  return true;
 }
 
-void BufferPoolManager::ReleaseNewFrameUnsafe(page_id_t old_page_id, page_id_t page_id, frame_id_t frame_id,
-                                              bool set_evictable) {
-  if (old_page_id != INVALID_PAGE_ID) {
-    page_table_.erase(old_page_id);
-    replacer_->Remove(frame_id);
+auto BufferPoolManager::TryCommitFrameUnsafe(frame_id_t &expected_frame_id, frame_id_t desired_frame_id,
+                                             page_id_t page_id) -> bool {
+  auto iter{page_table_.find(page_id)};
+  if (expected_frame_id == INVALID_FRAME_ID) {
+    if (iter != page_table_.end()) {
+      expected_frame_id = iter->second;
+      return false;
+    }
+  } else if (iter->second != expected_frame_id) {
+    expected_frame_id = iter->second;
+    return false;
   }
-  page_table_.emplace(page_id, frame_id);
-  if (set_evictable) {
-    replacer_->SetEvictable(frame_id, true);
-  }
+
+  page_table_.emplace(page_id, desired_frame_id);
+  // 让上层构造 PageGuard 时 record.
+  // replacer_->RecordAccess(frame_id);
+  return true;
 }
 
 auto BufferPoolManager::FindFrameUnsafe(page_id_t page_id) -> frame_id_t {
@@ -213,49 +245,7 @@ auto BufferPoolManager::FindFrameUnsafe(page_id_t page_id) -> frame_id_t {
  *
  * @return The page ID of the newly allocated page.
  */
-auto BufferPoolManager::NewPage() -> page_id_t {
-  while (true) {
-    page_id_t page_id{next_page_id_.fetch_add(1, std::memory_order_relaxed)};
-    frame_id_t frame_id{INVALID_FRAME_ID};
-    page_id_t old_page_id{INVALID_PAGE_ID};
-    {
-      std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
-      frame_id = AcquireNewFrameUnsafe();
-      if (frame_id == INVALID_FRAME_ID) {
-        return INVALID_PAGE_ID;
-      }
-    }
-    /**
-     * 此处存在 Race Window,
-     * 可能有另一个线程将此来自 `Evict` 的 page pinned.
-     * 对于来自 `free_list_` 的 frame, 其不可能还有其他线程正在使用.
-     * 所以二次检查只需要判断 pin.
-     */
-    {
-      std::lock_guard<std::shared_mutex> frame_guard{frames_[frame_id]->rwlatch_};
-      FrameHeader &frame{*frames_[frame_id]};
-      old_page_id = frame.page_id_;
-      if (frame.page_id_ != INVALID_PAGE_ID && frame.is_dirty_) {
-        FlushPageAsyncUnsafe(frame.page_id_, frame_id);
-      }
-      {
-        std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
-        /**
-         * 当前 page 不可能被另一个线程换入到已有的 frame,
-         * 因为是通过 `next_page_id_` atomic fadd 得到的 id.
-         * 如果未来改为 freelist, 此处可能需要更多考虑.
-         */
-        if (frame.pin_count_ > 0) {
-          continue;
-        }
-        ReleaseNewFrameUnsafe(old_page_id, page_id, frame_id, true);  // Evictable
-      }
-      frame.Reset();
-      frame.page_id_ = page_id;
-    }
-    return page_id;
-  }
-}
+auto BufferPoolManager::NewPage() -> page_id_t { return next_page_id_.fetch_add(1, std::memory_order_relaxed); }
 
 /**
  * @brief Removes a page from the database, both on disk and in memory.
@@ -279,46 +269,27 @@ auto BufferPoolManager::NewPage() -> page_id_t {
  * 删除 page, 需要删除 disk 上的数据.
  */
 auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
-  if (page_id == INVALID_PAGE_ID) {
-    throw Exception{"Invalid args."};
-  }
-  while (true) {
-    frame_id_t frame_id{INVALID_FRAME_ID};
-    {
-      std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
-      frame_id = FindFrameUnsafe(page_id);
-      if (frame_id == INVALID_FRAME_ID) {
-        disk_scheduler_->DeallocatePage(page_id);
-        return true;
-      }
-      FrameHeader &frame{*frames_[frame_id]};
-      if (frame.pin_count_ > 0) {
-        return false;
-      }
+  frame_id_t frame_id{INVALID_FRAME_ID};
+  {
+    std::lock_guard<std::shared_mutex> bpm_lk{*bpm_latch_};
+    // frame_id_t frame_id{FindFrameUnsafe(page_id)};
+    frame_id = FindFrameUnsafe(page_id);
+    if (frame_id == INVALID_FRAME_ID) {
+      disk_scheduler_->DeallocatePage(page_id);
+      return true;
     }
-    {
-      std::lock_guard<std::shared_mutex> frame_guard{frames_[frame_id]->rwlatch_};
-      FrameHeader &frame{*frames_[frame_id]};
-      {
-        std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
-        frame_id_t check_id{FindFrameUnsafe(page_id)};
-        // Validation.
-        if (frame_id != check_id) {
-          continue;
-        }
-        if (frame.pin_count_ > 0) {
-          return false;
-        }
-        // Validation passed.
-        replacer_->Remove(frame_id);
-        page_table_.erase(page_id);
-        free_frames_.emplace_back(frame_id);
-        disk_scheduler_->DeallocatePage(page_id);
-      }
-      frame.Reset();
+    FrameHeader &frame{*frames_[frame_id]};
+    if (frame.pin_count_ > 0) {
+      return false;
     }
-    return true;
+    replacer_->Remove(frame_id);
+    page_table_.erase(page_id);
+    // 独占.
+    frame.Reset();
+    free_frames_.emplace_back(frame_id);
+    disk_scheduler_->DeallocatePage(page_id);
   }
+  return true;
 }
 /**
  * @brief Acquires an optional write-locked guard over a page of data. The user can specify an `AccessType` if needed.
@@ -365,71 +336,62 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
   }
   while (true) {
     frame_id_t frame_id{INVALID_FRAME_ID};
-    page_id_t old_page_id{INVALID_PAGE_ID};
-    bool is_acquired{};
+    bool need_load{};
     {
-      std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
+      std::lock_guard<std::shared_mutex> bpm_lk{*bpm_latch_};
       frame_id = FindFrameUnsafe(page_id);
-
-      if (frame_id == INVALID_FRAME_ID) {
-        frame_id = AcquireNewFrameUnsafe();
-        if (frame_id == INVALID_FRAME_ID) {
-          return std::nullopt;
-        }
-        is_acquired = true;
-      }
-      FrameHeader &frame{*frames_[frame_id]};
-      if (!is_acquired) {
+      if (frame_id != INVALID_FRAME_ID) {  // In memory.
+        FrameHeader &frame{*frames_[frame_id]};
         if (frame.pin_count_++ == 0) {
           replacer_->SetEvictable(frame_id, false);
         }
+      } else {
+        if (!TryAllocateFrameUnsafe(frame_id)) {
+          return std::nullopt;
+        }
+        need_load = true;
       }
     }
 
-    if (is_acquired) {  // 从 `AcquireNewFrameUnsafe` 获得 frame.
-      {
-        std::lock_guard<std::shared_mutex> frame_guard{frames_[frame_id]->rwlatch_};
-        FrameHeader &frame{*frames_[frame_id]};
-        old_page_id = frame.page_id_;
-        // 此处必须 Flush
-        if (frame.page_id_ != INVALID_PAGE_ID && frame.is_dirty_) {
-          FlushPageAsyncUnsafe(frame.page_id_, frame_id);
-        }
-        frame.is_dirty_ = false;
-        {
-          std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
+    BUSTUB_ASSERT(frame_id != INVALID_FRAME_ID, "Unexpected.");
 
-          // Validation.
-          if (frame.pin_count_ > 0) {
-            continue;
-          }
-          frame_id_t check_id{FindFrameUnsafe(page_id)};
+    if (need_load) {
+      {
+        std::lock_guard<std::shared_mutex> frame_lk{frames_[frame_id]->rwlatch_};
+        FrameHeader &frame{*frames_[frame_id]};
+        /**
+         * 在此处立刻向 BPM 注册.
+         * 注册成功后, 才开始 IO, 并始终持有 frame lk.
+         */
+        {
+          std::lock_guard<std::shared_mutex> bpm_lk{*bpm_latch_};
+          // BUSTUB_ASSERT(frame.pin_count_ == 0, "Unexpected.");
           /**
-           * 如果 `check_id == INVALID_FRAME_ID` 则 page 不在 memory 中.
-           * 否则已经抢先被其他线程载入 memory.
+           * 此处可能 `frame.pin_count_ > 0`.
+           * `free_frames_` 中的 frame 可能仍被 pinned, 不影响正确性.
            */
-          if (check_id != INVALID_FRAME_ID) {
-            if (frame.page_id_ == INVALID_PAGE_ID) {  // 来自 `free_frames_`
-              free_frames_.emplace_back(frame_id);
-            } else {  // 来自 Evict
-              replacer_->SetEvictable(frame_id, true);
-            }
+          frame_id_t expected_frame_id{INVALID_FRAME_ID};
+          if (!TryCommitFrameUnsafe(expected_frame_id, frame_id, page_id)) {
+            /**
+             * 另一个线程抢先注册了 page id.
+             */
+            free_frames_.emplace_back(frame_id);  // 回退到 `free_frames_` 中.
+            frame.Reset();
             continue;
           }
-          ReleaseNewFrameUnsafe(old_page_id, page_id, frame_id, false);
           if (frame.pin_count_++ == 0) {
             replacer_->SetEvictable(frame_id, false);
           }
         }
+        /**
+         * Committed & Pinned. 开始 IO.
+         */
         frame.page_id_ = page_id;
         FetchPageAsyncUnsafe(page_id, frame_id).get();
       }
     }
 
-    replacer_->RecordAccess(frame_id);
-    WritePageGuard pg{page_id, frames_[frame_id], replacer_, bpm_latch_};
-
-    return std::make_optional(std::move(pg));
+    return WritePageGuard{page_id, frames_[frame_id], replacer_, bpm_latch_};
   }
 }
 
@@ -463,65 +425,58 @@ auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_typ
   }
   while (true) {
     frame_id_t frame_id{INVALID_FRAME_ID};
-    page_id_t old_page_id{INVALID_PAGE_ID};
-    bool is_acquired{};
+    bool need_load{};
     {
-      std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
+      std::lock_guard<std::shared_mutex> bpm_lk{*bpm_latch_};
       frame_id = FindFrameUnsafe(page_id);
-      if (frame_id == INVALID_FRAME_ID) {
-        frame_id = AcquireNewFrameUnsafe();
-        if (frame_id == INVALID_FRAME_ID) {
-          return std::nullopt;
-        }
-        is_acquired = true;
-      }
-      FrameHeader &frame{*frames_[frame_id]};
-      if (!is_acquired) {
+      if (frame_id != INVALID_FRAME_ID) {  // In memory.
+        FrameHeader &frame{*frames_[frame_id]};
         if (frame.pin_count_++ == 0) {
           replacer_->SetEvictable(frame_id, false);
         }
+      } else {
+        if (!TryAllocateFrameUnsafe(frame_id)) {
+          return std::nullopt;
+        }
+        need_load = true;
       }
     }
 
-    if (is_acquired) {
+    BUSTUB_ASSERT(frame_id != INVALID_FRAME_ID, "Unexpected.");
+
+    if (need_load) {
       {
-        std::lock_guard<std::shared_mutex> frame_guard{frames_[frame_id]->rwlatch_};
+        std::lock_guard<std::shared_mutex> frame_lk{frames_[frame_id]->rwlatch_};
         FrameHeader &frame{*frames_[frame_id]};
-        old_page_id = frame.page_id_;
-        if (frame.page_id_ != INVALID_PAGE_ID && frame.is_dirty_) {
-          FlushPageAsyncUnsafe(frame.page_id_, frame_id);
-        }
-        frame.is_dirty_ = false;
+        /**
+         * 在此处立刻向 BPM 注册.
+         * 注册成功后, 才开始 IO, 并始终持有 frame lk.
+         */
         {
-          std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
-          if (frame.pin_count_ > 0) {
+          std::lock_guard<std::shared_mutex> bpm_lk{*bpm_latch_};
+          // BUSTUB_ASSERT(frame.pin_count_ == 0, "Unexpected.");
+          frame_id_t expected_frame_id{INVALID_FRAME_ID};
+          if (!TryCommitFrameUnsafe(expected_frame_id, frame_id, page_id)) {
+            /**
+             * 另一个线程抢先注册了 page id.
+             */
+            free_frames_.emplace_back(frame_id);  // 回退到 `free_frames_` 中.
+            frame.Reset();
             continue;
           }
-          // 防止当前 page 已经被另一线程换入到已有的 frame 里
-          frame_id_t check_id{FindFrameUnsafe(page_id)};
-          if (check_id != INVALID_FRAME_ID) {
-            if (frame.page_id_ == INVALID_PAGE_ID) {  // 来自 `free_frames_`
-              free_frames_.emplace_back(frame_id);
-            } else {  // 来自 Evict
-              replacer_->SetEvictable(frame_id, true);
-            }
-            continue;
-          }
-          ReleaseNewFrameUnsafe(old_page_id, page_id, frame_id, false);
           if (frame.pin_count_++ == 0) {
             replacer_->SetEvictable(frame_id, false);
           }
         }
-
+        /**
+         * Committed & Pinned. 开始 IO.
+         */
         frame.page_id_ = page_id;
         FetchPageAsyncUnsafe(page_id, frame_id).get();
       }
     }
 
-    replacer_->RecordAccess(frame_id);
-    ReadPageGuard pg{page_id, frames_[frame_id], replacer_, bpm_latch_};
-
-    return std::make_optional(std::move(pg));
+    return ReadPageGuard{page_id, frames_[frame_id], replacer_, bpm_latch_};
   }
 }
 
@@ -590,10 +545,6 @@ auto BufferPoolManager::ReadPage(page_id_t page_id, AccessType access_type) -> R
  *
  * @param page_id The page ID of the page to be flushed.
  * @return `false` if the page could not be found in the page table, otherwise `true`.
- *
- * 调用前必须 lock frame.
- * 此函数不会死锁,
- * 前提是没有其他函数尝试嵌套 BufferPoolManager `bpm_latch_` + FrameHeader `rwlatch_`.
  */
 auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool {
   if (page_id == INVALID_PAGE_ID) {
@@ -601,16 +552,31 @@ auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool {
   }
   frame_id_t frame_id{INVALID_FRAME_ID};
   {
-    std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
+    std::lock_guard<std::shared_mutex> bpm_lk{*bpm_latch_};
     frame_id = FindFrameUnsafe(page_id);
     if (frame_id == INVALID_FRAME_ID) {
       return false;
     }
+    FrameHeader &frame{*frames_[frame_id]};
+    if (frame.pin_count_++ == 0) {
+      replacer_->SetEvictable(frame_id, false);
+    }
   }
 
+  // {
+  // std::shared_lock<std::shared_mutex> frame_lk{frames_[frame_id]->rwlatch_};
   FrameHeader &frame{*frames_[frame_id]};
-  FlushPageAsyncUnsafe(page_id, frame_id);
-  frame.is_dirty_ = false;
+  if (frame.is_dirty_) {
+    FlushPageAsyncUnsafe(page_id, frame_id);
+    frame.is_dirty_ = false;
+  }
+  {
+    std::lock_guard<std::shared_mutex> bpm_lk{*bpm_latch_};
+    if (frame.pin_count_-- == 1) {
+      replacer_->SetEvictable(frame_id, true);
+    }
+  }
+  // }
   return true;
 }
 
@@ -627,7 +593,7 @@ auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool {
 void BufferPoolManager::FlushAllPages() {
   for (auto &frame_ptr : frames_) {
     {
-      std::lock_guard<std::shared_mutex> frame_guard{frame_ptr->rwlatch_};
+      std::shared_lock<std::shared_mutex> frame_guard{frame_ptr->rwlatch_};
       if (frame_ptr->page_id_ == INVALID_PAGE_ID || !frame_ptr->is_dirty_) {
         continue;
       }
@@ -663,62 +629,14 @@ void BufferPoolManager::FlushAllPages() {
  */
 auto BufferPoolManager::GetPinCount(page_id_t page_id) -> std::optional<size_t> {
   {
-    std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
+    std::lock_guard<std::shared_mutex> bpm_lk{*bpm_latch_};
     frame_id_t frame_id{FindFrameUnsafe(page_id)};
     if (frame_id == INVALID_FRAME_ID) {
       return std::nullopt;
     }
     FrameHeader &frame{*frames_[frame_id]};
-    size_t res{frame.pin_count_};
-    return std::make_optional(res);
+    return frame.pin_count_;
   }
-}
-
-/**
- * @brief 对一个已在 memory 中的 page 增加 pin 计数.
- *
- * Hint 函数, 效果不定.
- * 必须要在持有 page 的 lock 时调用.
- *
- * @param page_id 已在 memory 中的某个 page 的 id.
- * @return bool 若成功则返回 true, 若不在 memory 中则返回 false.
- */
-auto BufferPoolManager::PinPage(page_id_t page_id) -> bool {
-  {
-    std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
-    frame_id_t frame_id{FindFrameUnsafe(page_id)};
-    if (frame_id == INVALID_FRAME_ID) {
-      return false;
-    }
-    FrameHeader &frame{*frames_[frame_id]};
-    if (frame.pin_count_++ == 0) {
-      replacer_->SetEvictable(frame_id, false);
-    }
-  }
-  return true;
-}
-/**
- * @brief 对一个已在 memory 中的 page 减少 pin 计数.
- *
- * Hint 函数, 效果不定.
- * 必须要在持有 page 的 lock 时调用.
- *
- * @param page_id 已在 memory 中的某个 page 的 id.
- * @return bool 若成功则返回 true, 若不在 memory 中则返回 false.
- */
-auto BufferPoolManager::UnpinPage(page_id_t page_id) -> bool {
-  {
-    std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
-    frame_id_t frame_id{FindFrameUnsafe(page_id)};
-    if (frame_id == INVALID_FRAME_ID) {
-      return false;
-    }
-    FrameHeader &frame{*frames_[frame_id]};
-    if (frame.pin_count_-- == 1) {
-      replacer_->SetEvictable(frame_id, true);
-    }
-  }
-  return true;
 }
 
 void BufferPoolManager::SetCallbackOnDestroyUnsafe(const std::function<void()> &func) { callback_.emplace_back(func); }
