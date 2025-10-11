@@ -112,8 +112,8 @@ class BPlusTreePage {
    * 非 Level Head Node 保留 `low_level_head_id_` Slot,
    * 以便在从左向右的 Merge 中继承来自旧 Level Head 的字段.
    */
-  auto GetLowLevelHeadId() const -> const page_id_t &;
-  void SetLowLevelHeadId(page_id_t low_level_head_id);
+  // auto GetLowLevelHeadId() const -> const page_id_t &;
+  // void SetLowLevelHeadId(page_id_t low_level_head_id);
 
   /**
    * 只有在 `Is{Over, Under}flowedWith` 返回 `false` 时,
@@ -184,7 +184,7 @@ class BPlusTreePage {
    * 且这个过程必须和 `DeleteKvAt` 是原子的.
    * > 在修改此字段前, 二次校验新的 id 是否是 level head.
    */
-  page_id_t low_level_head_id_;
+  // page_id_t low_level_head_id_;
 
   /**
    * BPlusTreePage 不需要额外的锁,

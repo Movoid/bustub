@@ -160,12 +160,18 @@ class BPlusTreeLeafPage : public BPlusTreePage {
   void ModifyKvAt(int index, const KeyType &key, const ValueType &val);
   void DeleteKvAt(int index);
 
-  void RedistributeWithRight(WritePageGuard &rpage_g_w, int l_size, int r_size);
+  // void RedistributeWithRight(WritePageGuard &rpage_g_w, int l_size, int r_size);
+
+  void MergeToRight(WritePageGuard &sib_g_w);
+  void MergeFromRight(WritePageGuard &sib_g_w);
+  void SplitToRight(WritePageGuard &sib_g_w);
 
   /**
    * 传统 B Plus Tree 在 LeafNode key[0] 修改时需要修改 parent InternalNode 对应 key,
    * 但此实现不会这么做.
    */
+
+  void LinkToNewSibling(WritePageGuard &sib_g_w);
 };
 
 #define B_PLUS_TREE_LEAF_PAGE_TYPE BPlusTreeLeafPage<KeyType, ValueType, KeyComparator>

@@ -82,7 +82,8 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
   while (!page_g.As<BPlusTreePage>()->IsLeafPage()) {
     auto page_data{page_g.As<InternalPage>()};
     int lowerbound_idx{page_data->FindIndexLowerbound(key, comparator_)};
-    page_id_t next_id{lowerbound_idx == 0 ? page_data->GetLowLevelHeadId() : page_data->ValueAt(lowerbound_idx - 1)};
+    // page_id_t next_id{lowerbound_idx == 0 ? page_data->GetLowLevelHeadId() : page_data->ValueAt(lowerbound_idx - 1)};
+    page_id_t next_id{page_data->ValueAt(lowerbound_idx - 1)};
     page_g.Drop();
     page_g = bpm_->ReadPage(next_id);
     GoSibUntilCoverRR(page_g, key);
@@ -142,7 +143,9 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
       backfix_path.EmplaceBack(page_g.GetPageId());
       auto page_data{page_g.As<InternalPage>()};
       int lowerbound_idx{page_data->FindIndexLowerbound(key, comparator_)};
-      page_id_t next_id{lowerbound_idx == 0 ? page_data->GetLowLevelHeadId() : page_data->ValueAt(lowerbound_idx - 1)};
+      // page_id_t next_id{lowerbound_idx == 0 ? page_data->GetLowLevelHeadId() : page_data->ValueAt(lowerbound_idx -
+      // 1)};
+      page_id_t next_id{page_data->ValueAt(lowerbound_idx - 1)};
       page_g.Drop();
       page_g = bpm_->ReadPage(next_id);
       GoSibUntilCoverRR(page_g, key);
@@ -261,8 +264,9 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key) {
       backfix_path.EmplaceBack(page_g.GetPageId());
       auto page_data{page_g.As<InternalPage>()};
       int lowerbound_idx{page_data->FindIndexLowerbound(key, comparator_)};
-      // page_id_t next_id{page_data->ValueAt(std::max(0, upperbound_idx - 1))};
-      page_id_t next_id{lowerbound_idx == 0 ? page_data->GetLowLevelHeadId() : page_data->ValueAt(lowerbound_idx - 1)};
+      // page_id_t next_id{lowerbound_idx == 0 ? page_data->GetLowLevelHeadId() : page_data->ValueAt(lowerbound_idx -
+      // 1)};
+      page_id_t next_id{page_data->ValueAt(lowerbound_idx - 1)};
       page_g.Drop();
       page_g = bpm_->ReadPage(next_id);
       GoSibUntilCoverRR(page_g, key);
@@ -358,7 +362,8 @@ auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE {
   ReadPageGuard page_g{bpm_->ReadPage(cur_root_id)};
   while (!page_g.As<BPlusTreePage>()->IsLeafPage()) {
     auto page_data{page_g.As<InternalPage>()};
-    page_id_t next_id{page_data->GetLowLevelHeadId()};
+    // page_id_t next_id{page_data->GetLowLevelHeadId()};
+    page_id_t next_id{page_data->ValueAt(0)};
     page_g.Drop();
     page_g = bpm_->ReadPage(next_id);
   }
@@ -398,7 +403,8 @@ auto BPLUSTREE_TYPE::Begin(const KeyType &key) -> INDEXITERATOR_TYPE {
     // Is internal node. Go down.
     auto page_data{page_g.As<InternalPage>()};
     int lowerbound_idx{page_data->FindIndexLowerbound(key, comparator_)};
-    page_id_t next_id{lowerbound_idx == 0 ? page_data->GetLowLevelHeadId() : page_data->ValueAt(lowerbound_idx - 1)};
+    // page_id_t next_id{lowerbound_idx == 0 ? page_data->GetLowLevelHeadId() : page_data->ValueAt(lowerbound_idx - 1)};
+    page_id_t next_id{page_data->ValueAt(lowerbound_idx - 1)};
     page_g.Drop();
     page_g = bpm_->ReadPage(next_id);
     GoSibUntilCoverRR(page_g, key);
@@ -600,8 +606,8 @@ void BPLUSTREE_TYPE::GetPathTo(int to_level, const KeyType &key, PathContainer &
     auto page_data{page_g.As<InternalPage>()};
     path.EmplaceBack(page_g.GetPageId());
     int lowerbound_idx{page_data->FindIndexLowerbound(key, comparator_)};
-    // page_id_t next_id{page_data->ValueAt(std::max(0, upperbound_idx - 1))};
-    page_id_t next_id{lowerbound_idx == 0 ? page_data->GetLowLevelHeadId() : page_data->ValueAt(lowerbound_idx - 1)};
+    // page_id_t next_id{lowerbound_idx == 0 ? page_data->GetLowLevelHeadId() : page_data->ValueAt(lowerbound_idx - 1)};
+    page_id_t next_id{page_data->ValueAt(lowerbound_idx - 1)};
     page_g.Drop();
     page_g = bpm_->ReadPage(next_id);
     GoSibUntilCoverRR(page_g, key);
@@ -625,43 +631,32 @@ auto BPLUSTREE_TYPE::TrySplitAndGo(WritePageGuard &page_g, const KeyType &key, I
     return false;
   }
 
+  page_id_t new_sib_id{bpm_->NewPage()};
+  WritePageGuard new_sib_g_w{bpm_->WritePage(new_sib_id)};
+  auto new_sib_header_data{new_sib_g_w.AsMut<BPlusTreePage>()};
+
   if (page_header_data->IsLeafPage()) {
     auto page_data{page_g.AsMut<LeafPage>()};
-    {
-      page_id_t new_sib_id{bpm_->NewPage()};
-      WritePageGuard new_sib_g_w{bpm_->WritePage(new_sib_id)};
-      auto new_sib_data{new_sib_g_w.AsMut<LeafPage>()};
-      new_sib_data->Init(leaf_max_size_);
-      int kv_sum{page_data->GetSize() + new_sib_data->GetSize()};
-      page_data->RedistributeWithRight(new_sib_g_w, (kv_sum + 1) / 2, kv_sum / 2);
-      new_sib_data->SetNextPageId(page_data->GetNextPageId());
-      page_data->SetNextPageId(new_sib_g_w.GetPageId());
-      new_sib_data->SetLevel(page_data->GetLevel());
-      backfix_kv = {new_sib_data->GetLowKey(), new_sib_g_w.GetPageId(), false, INVALID_PAGE_ID};
-      new_sib_data->SetBackfixStatus(BackfixStatus::NEED_LINK);
-      // 注意 CoveredKey 根据 highkey 判断,
-      // 此处不能因为 Sibling covered 而 goto sibling.
-      if (!page_data->CoveredKey(key, comparator_)) {
-        page_g = std::move(new_sib_g_w);
-      }
+    auto new_sib_data{new_sib_g_w.AsMut<LeafPage>()};
+    new_sib_data->Init(leaf_max_size_);
+    // page_data->RedistributeWithRight(new_sib_g_w);
+    page_data->SplitToRight(new_sib_g_w);
+    page_data->LinkToNewSibling(new_sib_g_w);
+    backfix_kv = {new_sib_data->GetLowKey(), new_sib_g_w.GetPageId(), false, INVALID_PAGE_ID};
+    new_sib_header_data->SetBackfixStatus(BackfixStatus::NEED_LINK);
+    if (!page_data->CoveredKey(key, comparator_)) {
+      page_g = std::move(new_sib_g_w);
     }
   } else {
     auto page_data{page_g.AsMut<InternalPage>()};
-    {
-      page_id_t new_sib_id{bpm_->NewPage()};
-      WritePageGuard new_sib_g_w{bpm_->WritePage(new_sib_id)};
-      auto new_sib_data{new_sib_g_w.AsMut<InternalPage>()};
-      new_sib_data->Init(internal_max_size_);
-      int kv_sum{page_data->GetSize() + new_sib_data->GetSize()};
-      page_data->RedistributeWithRight(new_sib_g_w, (kv_sum + 1) / 2, kv_sum / 2);
-      new_sib_data->SetNextPageId(page_data->GetNextPageId());
-      page_data->SetNextPageId(new_sib_g_w.GetPageId());
-      new_sib_data->SetLevel(page_data->GetLevel());
-      backfix_kv = {new_sib_data->GetLowKey(), new_sib_g_w.GetPageId(), false, INVALID_PAGE_ID};
-      new_sib_data->SetBackfixStatus(BackfixStatus::NEED_LINK);
-      if (!page_data->CoveredKey(key, comparator_)) {
-        page_g = std::move(new_sib_g_w);
-      }
+    auto new_sib_data{new_sib_g_w.AsMut<InternalPage>()};
+    new_sib_data->Init(internal_max_size_);
+    page_data->SplitToRight(new_sib_g_w);
+    page_data->LinkToNewSibling(new_sib_g_w);
+    backfix_kv = {new_sib_data->GetLowKey(), new_sib_g_w.GetPageId(), false, INVALID_PAGE_ID};
+    new_sib_header_data->SetBackfixStatus(BackfixStatus::NEED_LINK);
+    if (!page_data->CoveredKey(key, comparator_)) {
+      page_g = std::move(new_sib_g_w);
     }
   }
   return true;
@@ -693,7 +688,7 @@ auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_
   }
 
   auto sib_status{sib_header_data->GetBackfixStatus()};
-  int kv_sum{page_header_data->GetSize() + sib_header_data->GetSize()};
+  // int kv_sum{page_header_data->GetSize() + sib_header_data->GetSize()};
 
   switch (sib_status) {
     case BackfixStatus::NEED_LINK:
@@ -702,13 +697,24 @@ auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_
        */
       if (page_header_data->IsLeafPage()) {
         auto page_data{page_g.AsMut<LeafPage>()};
-        page_data->RedistributeWithRight(sib_g_w, kv_sum, 0);
+        auto sib_data{sib_g_w.AsMut<InternalPage>()};
+        page_data->MergeFromRight(sib_g_w);
+        // 手动调整 Link.
+        page_header_data->SetNextPageId(sib_header_data->GetNextPageId());
+        if (sib_header_data->GetNextPageId() != INVALID_PAGE_ID) {
+          page_data->SetHighKey(sib_data->GetHighKey());
+        }
       } else {
         auto page_data{page_g.AsMut<InternalPage>()};
-        page_data->RedistributeWithRight(sib_g_w, kv_sum, 0);
+        auto sib_data{sib_g_w.AsMut<InternalPage>()};
+        page_data->MergeFromRight(sib_g_w);
+        page_header_data->SetNextPageId(sib_header_data->GetNextPageId());
+        if (sib_header_data->GetNextPageId() != INVALID_PAGE_ID) {
+          page_data->SetHighKey(sib_data->GetHighKey());
+        }
       }
-      page_header_data->SetNextPageId(sib_header_data->GetNextPageId());
       sib_header_data->SetNextPageId(page_g.GetPageId());
+
       sib_header_data->SetBackfixStatus(BackfixStatus::IS_UNLINKED);
       qsbr_mgr_.Retire(sib_g_w.GetPageId());
       backfix_kv = std::nullopt;
@@ -717,7 +723,9 @@ auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_
     case BackfixStatus::NEED_UNLINK:
       // 在 BackfixRemoveKv 里 Retire.
     case BackfixStatus::IS_UNLINKED:
-      BUSTUB_ASSERT(sib_header_data->GetSize() == 0, "Unexpected.");
+      BUSTUB_ASSERT((sib_header_data->IsLeafPage() && sib_header_data->GetSize() == 0) ||
+                        (!sib_header_data->IsLeafPage() && sib_header_data->GetSize() == 1),
+                    "Unexpected.");
       page_header_data->SetNextPageId(sib_header_data->GetNextPageId());
       backfix_kv = std::nullopt;
       break;
@@ -738,35 +746,38 @@ auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_
       page_header_data->SetIsLevelHead(false);
       if (page_header_data->IsLeafPage()) {
         auto page_data{page_g.AsMut<LeafPage>()};
-        page_data->RedistributeWithRight(sib_g_w, 0, kv_sum);
         auto sib_data{sib_g_w.AsMut<LeafPage>()};
+        page_data->MergeToRight(sib_g_w);
         backfix_kv = {sib_data->GetLowKey(), page_g.GetPageId(), true, sib_g_w.GetPageId()};
       } else {
         auto page_data{page_g.AsMut<InternalPage>()};
-        page_data->RedistributeWithRight(sib_g_w, 0, kv_sum);
         auto sib_data{sib_g_w.AsMut<InternalPage>()};
+        if (sib_data->ValueAt(0) != INVALID_PAGE_ID) {
+          page_id_t old_low_id{page_data->ValueAt(0)};
+          qsbr_mgr_.Retire(std::move(old_low_id));  // NOLINT
+        }
+        page_data->MergeToRight(sib_g_w);
         backfix_kv = {sib_data->GetLowKey(), page_g.GetPageId(), true, sib_g_w.GetPageId()};
       }
 
-      // 如果是 Internal 节点, Sibling 需要继承 `low_level_head_id_`.
-      if (!page_header_data->IsLeafPage()) {  // Internal Node.
-        /**
-         * 考虑 Sibling 的子节点是 Level Head, 其成为 Head 后立刻向右 Merge,
-         * 使得本不是 Level Head 的 Sibling 持有有效的 `low_level_head_id_`, 此时不该被覆盖.
-         */
-        if (sib_header_data->GetLowLevelHeadId() == INVALID_PAGE_ID) {
-          sib_header_data->SetLowLevelHeadId(page_header_data->GetLowLevelHeadId());
-        } else {
-          page_id_t low_id{page_header_data->GetLowLevelHeadId()};
-          qsbr_mgr_.Retire(std::move(low_id));  // NOLINT
-        }
-      }
+      // // 如果是 Internal 节点, Sibling 需要继承 `low_level_head_id_`.
+      // if (!page_header_data->IsLeafPage()) {  // Internal Node.
+      //   /**
+      //    * 考虑 Sibling 的子节点是 Level Head, 其成为 Head 后立刻向右 Merge,
+      //    * 使得本不是 Level Head 的 Sibling 持有有效的 `low_level_head_id_`, 此时不该被覆盖.
+      //    */
+      //   if (sib_header_data->GetLowLevelHeadId() == INVALID_PAGE_ID) {
+      //     sib_header_data->SetLowLevelHeadId(page_header_data->GetLowLevelHeadId());
+      //   } else {
+      //     page_id_t low_id{page_header_data->GetLowLevelHeadId()};
+      //     qsbr_mgr_.Retire(std::move(low_id));  // NOLINT
+      //   }
+      // }
 
       /**
        * 此节点不应该被设为 false.
        * 此节点若是 Internal Node, 此时右侧 Internal Node 应该持有有效的 `low_level_head_id_`.
        */
-      page_header_data->SetIsLevelHead(false);
       sib_header_data->SetIsLevelHead(true);
       page_header_data->SetBackfixStatus(BackfixStatus::NEED_UNLINK);
       /**
@@ -815,7 +826,7 @@ auto BPLUSTREE_TYPE::TryNewRoot(page_id_t &new_root_id) -> bool {
       }
       auto desired_root_data{desired_root_g_w.AsMut<LeafPage>()};
       desired_root_data->SetLevel(1);
-      desired_root_data->SetLowLevelHeadId(INVALID_PAGE_ID);
+      // desired_root_data->SetLowLevelHeadId(INVALID_PAGE_ID);
       tree_header_data->root_page_id_ = desired_root_id;
     }
   } else {
@@ -844,7 +855,8 @@ auto BPLUSTREE_TYPE::TryNewRoot(page_id_t &new_root_id) -> bool {
         // Update root.
         auto desired_root_data{desired_root_g_w.AsMut<InternalPage>()};
         desired_root_data->SetLevel(expected_root_header_data->GetLevel() + 1);
-        desired_root_data->SetLowLevelHeadId(expected_root_g.GetPageId());
+        // desired_root_data->SetLowLevelHeadId(expected_root_g.GetPageId());
+        desired_root_data->ModifyKvAt(0, KeyType{}, expected_root_g.GetPageId());
         tree_header_data->root_page_id_ = desired_root_id;
       }
     }
@@ -868,9 +880,22 @@ auto BPLUSTREE_TYPE::TryDeleteRoot(page_id_t &new_root_id) -> bool {
   {
     WritePageGuard expected_root_g{bpm_->WritePage(expected_root_id)};
     auto expected_root_header_data{expected_root_g.AsMut<BPlusTreePage>()};
+    // if (expected_root_header_data->GetBackfixStatus() != BackfixStatus::IS_LINKED ||
+    //     !expected_root_header_data->IsLevelHead() || expected_root_header_data->GetSize() != 0 ||
+    //     expected_root_header_data->GetNextPageId() != INVALID_PAGE_ID) {
+    //   expected_root_g.Drop();
+    //   new_root_id = GetRootPageId();
+    //   return false;
+    // }
     if (expected_root_header_data->GetBackfixStatus() != BackfixStatus::IS_LINKED ||
-        !expected_root_header_data->IsLevelHead() || expected_root_header_data->GetSize() != 0 ||
-        expected_root_header_data->GetNextPageId() != INVALID_PAGE_ID) {
+        !expected_root_header_data->IsLevelHead() || expected_root_header_data->GetNextPageId() != INVALID_PAGE_ID) {
+      expected_root_g.Drop();
+      new_root_id = GetRootPageId();
+      return false;
+    }
+
+    if ((expected_root_header_data->IsLeafPage() && expected_root_header_data->GetSize() != 0) ||
+        (!expected_root_header_data->IsLeafPage() && expected_root_header_data->GetSize() != 1)) {
       expected_root_g.Drop();
       new_root_id = GetRootPageId();
       return false;
@@ -882,9 +907,14 @@ auto BPLUSTREE_TYPE::TryDeleteRoot(page_id_t &new_root_id) -> bool {
         new_root_id = tree_header_data->root_page_id_;
         return false;
       }
-      // If expected root is leaf, then new root is `INVALID_PAGE_ID`.
-      tree_header_data->root_page_id_ = expected_root_header_data->GetLowLevelHeadId();
-      new_root_id = expected_root_header_data->GetLowLevelHeadId();
+      if (expected_root_header_data->IsLeafPage()) {
+        tree_header_data->root_page_id_ = INVALID_PAGE_ID;
+        new_root_id = INVALID_PAGE_ID;
+      } else {
+        auto expected_root_data{expected_root_g.As<InternalPage>()};
+        tree_header_data->root_page_id_ = expected_root_data->ValueAt(0);
+        new_root_id = expected_root_data->ValueAt(0);
+      }
     }
     /**
      * DeleteRoot 发生后, 可能有其他线程根据 backfix_path 走到此节点, 并插入 kv.
@@ -895,42 +925,6 @@ auto BPLUSTREE_TYPE::TryDeleteRoot(page_id_t &new_root_id) -> bool {
   }
   return true;
 }
-
-/**
- * 疑似存在问题. 这个函数貌似不该存在.
- */
-// INDEX_TEMPLATE_ARGUMENTS
-// auto BPLUSTREE_TYPE::TryUpdateRoot(page_id_t &new_root_id) -> bool {
-//   page_id_t expected_root_id{GetRootPageId()};
-//   if (expected_root_id == INVALID_PAGE_ID) {
-//     new_root_id = INVALID_PAGE_ID;
-//     return false;
-//   }
-
-//   {
-//     ReadPageGuard expected_root_g{bpm_->ReadPage(expected_root_id)};
-//     auto expected_root_header_data{expected_root_g.As<BPlusTreePage>()};
-//     while (!expected_root_header_data->IsLevelHead() && expected_root_header_data->GetNextPageId() !=
-//     INVALID_PAGE_ID) {
-//       page_id_t sib_id{expected_root_header_data->GetNextPageId()};
-//       expected_root_g.Drop();
-//       expected_root_g = bpm_->ReadPage(sib_id);
-//       expected_root_header_data = expected_root_g.As<BPlusTreePage>();
-//     }
-//     BUSTUB_ASSERT(expected_root_header_data->IsLevelHead(), "Unexpected.");
-//     page_id_t desired_root_id{expected_root_g.GetPageId()};
-//     {
-//       WritePageGuard tree_header_g_w{bpm_->WritePage(header_page_id_)};
-//       auto tree_header_data{tree_header_g_w.AsMut<BPlusTreeHeaderPage>()};
-//       if (tree_header_data->root_page_id_ != expected_root_id) {
-//         new_root_id = tree_header_data->root_page_id_;
-//         return false;
-//       }
-//       tree_header_data->root_page_id_ = desired_root_id;
-//     }
-//   }
-//   return true;
-// }
 
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::BackfixInsertKv(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool {
@@ -1030,7 +1024,8 @@ auto BPLUSTREE_TYPE::BackfixRemoveKv(WritePageGuard &page_g, IndexKvPack &backfi
     if (check_page_header_data->IsLevelHead()) {
       // `page_data` 可能有旧的 `low_level_head_id_`.
       // 这个旧的 low level head page 应该在此前被标记为 `NEED_UNLINK`.
-      page_data->SetLowLevelHeadId(check_page_g.GetPageId());
+      // page_data->SetLowLevelHeadId(check_page_g.GetPageId());
+      page_data->ModifyKvAt(0, KeyType{}, check_page_g.GetPageId());
     }
   }
 

@@ -152,7 +152,13 @@ class BPlusTreeInternalPage : public BPlusTreePage {
   void ModifyKvAt(int index, const KeyType &key, const ValueType &val);
   void DeleteKvAt(int index);
 
-  void RedistributeWithRight(WritePageGuard &rpage_g_w, int l_size, int r_size);
+  // void RedistributeWithRight(WritePageGuard &rpage_g_w, int l_size, int r_size);
+
+  void MergeToRight(WritePageGuard &sib_g_w);
+  void MergeFromRight(WritePageGuard &sib_g_w);
+  void SplitToRight(WritePageGuard &sib_g_w);
+
+  void LinkToNewSibling(WritePageGuard &sib_g_w);
 };
 
 #define B_PLUS_TREE_INTERNAL_PAGE_TYPE BPlusTreeInternalPage<KeyType, ValueType, KeyComparator>
