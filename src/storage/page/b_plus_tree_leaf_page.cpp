@@ -41,7 +41,7 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::Init(int max_size) {
   SetBackfixStatus(BackfixStatus::INVALID);
   SetNextPageId(INVALID_PAGE_ID);
   SetIsLevelHead(false);
-  SetLowKey(KeyType{});
+  SetLowerlevelHeadId(INVALID_PAGE_ID);
 }
 
 /*
@@ -173,8 +173,8 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::MergeToRight(WritePageGuard &sib_g_w) {
   auto sib_data{sib_g_w.AsMut<BPlusTreeLeafPage>()};
 
   if (GetSize() > 0) {
-    std::memmove(sib_data->key_array_ + GetSize(), sib_data->key_array_, sizeof(KeyType) * (sib_data->GetSize()));
-    std::memmove(sib_data->rid_array_ + GetSize(), sib_data->rid_array_, sizeof(ValueType) * (sib_data->GetSize()));
+    std::memmove(sib_data->key_array_ + GetSize(), sib_data->key_array_, sizeof(KeyType) * sib_data->GetSize());
+    std::memmove(sib_data->rid_array_ + GetSize(), sib_data->rid_array_, sizeof(ValueType) * sib_data->GetSize());
     std::memcpy(sib_data->key_array_, key_array_, sizeof(KeyType) * GetSize());
     std::memcpy(sib_data->rid_array_, rid_array_, sizeof(ValueType) * GetSize());
   }
@@ -227,70 +227,6 @@ void B_PLUS_TREE_LEAF_PAGE_TYPE::LinkToNewSibling(WritePageGuard &sib_g_w) {
   SetNextPageId(sib_g_w.GetPageId());
   SetHighKey(sib_data->GetLowKey());
 }
-
-// /**
-//  * WARNING: 此函数不修改 SibLink.
-//  *
-//  * 此函数需要优化. Todo.
-//  * 实际只会有两种操作, Split 和 Merge.
-//  * 不存在均分操作.
-//  *
-//  * WARNING: 如果左侧只有 1 个 kv, 尝试向右 Split,
-//  * 将造成右侧节点 lowkey 错误.
-//  */
-// INDEX_TEMPLATE_ARGUMENTS
-// void B_PLUS_TREE_LEAF_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage_g_w, int l_size, int r_size) {
-//   int l_diff_cnt{l_size - GetSize()};
-//   int r_diff_cnt{r_size - rpage_g_w.As<BPlusTreeLeafPage>()->GetSize()};
-
-//   BUSTUB_ASSERT(l_diff_cnt + r_diff_cnt == 0, "Invalid args.");
-
-//   auto rpage_data{rpage_g_w.AsMut<BPlusTreeLeafPage>()};
-
-//   if (l_diff_cnt > 0) {
-//     // l need `+l_diff_cnt` kv pairs.
-//     std::memmove(key_array_ + GetSize(), rpage_data->key_array_, sizeof(KeyType) * l_diff_cnt);
-//     std::memmove(rid_array_ + GetSize(), rpage_data->rid_array_, sizeof(ValueType) * l_diff_cnt);
-//     std::memmove(rpage_data->key_array_, rpage_data->key_array_ + l_diff_cnt,
-//                  sizeof(KeyType) * (rpage_data->GetSize() - l_diff_cnt));
-//     std::memmove(rpage_data->rid_array_, rpage_data->rid_array_ + l_diff_cnt,
-//                  sizeof(ValueType) * (rpage_data->GetSize() - l_diff_cnt));
-
-//   } else if (r_diff_cnt > 0) {
-//     // r need `+r_diff_cnt` kv pairs.
-//     std::memmove(rpage_data->key_array_ + r_diff_cnt, rpage_data->key_array_, sizeof(KeyType) *
-//     rpage_data->GetSize()); std::memmove(rpage_data->rid_array_ + r_diff_cnt, rpage_data->rid_array_,
-//                  sizeof(ValueType) * rpage_data->GetSize());
-//     std::memmove(rpage_data->key_array_, key_array_ + GetSize() - r_diff_cnt, sizeof(KeyType) * r_diff_cnt);
-//     std::memmove(rpage_data->rid_array_, rid_array_ + GetSize() - r_diff_cnt, sizeof(ValueType) * r_diff_cnt);
-//   }
-
-//   SetSize(l_size);
-//   rpage_data->SetSize(r_size);
-
-//   /**
-//    * WARNING: Leaf Node 的 lowkey 允许和 `key[0]` 不相等.
-//    * 不要随意修改 lowkey.
-//    */
-
-//   if (GetSize() == 0) {  // Merged to right.
-//     if (rpage_data->GetSize() != 0) {
-//       SetHighKey(rpage_data->KeyAt(0));
-//     }
-//   } else if (rpage_data->GetSize() == 0) {  // Merged to left.
-//     if (rpage_data->GetNextPageId() != INVALID_PAGE_ID) {
-//       SetHighKey(rpage_data->GetHighKey());
-//     }
-//     rpage_data->SetHighKey(KeyAt(0));
-//   } else {  // Splited to sibling.
-//     BUSTUB_ASSERT(GetSize() != 0 && rpage_data->GetSize() != 0, "Invalid args.");
-//     if (GetNextPageId() != INVALID_PAGE_ID) {
-//       rpage_data->SetHighKey(GetHighKey());
-//     }
-//     rpage_data->SetLowKey(rpage_data->KeyAt(0));
-//     SetHighKey(rpage_data->KeyAt(0));
-//   }
-// }
 
 template class BPlusTreeLeafPage<GenericKey<4>, RID, GenericComparator<4>>;
 template class BPlusTreeLeafPage<GenericKey<8>, RID, GenericComparator<8>>;

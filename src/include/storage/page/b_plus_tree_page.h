@@ -102,21 +102,11 @@ class BPlusTreePage {
   auto IsLevelHead() const -> bool;
   void SetIsLevelHead(bool is_level_head);
 
-  /**
-   * 对 Level Head Node 的特殊机制.
-   * 指向 [-inf, ...) 区间, 此 Node 在当前节点无 kv 对应.
-   *
-   * 关于 `lowkey_`, Level Head Node 没有 `lowkey_`,
-   * 不以正常方式 link 在 parent 中.
-   *
-   * 非 Level Head Node 保留 `low_level_head_id_` Slot,
-   * 以便在从左向右的 Merge 中继承来自旧 Level Head 的字段.
-   */
-  // auto GetLowLevelHeadId() const -> const page_id_t &;
-  // void SetLowLevelHeadId(page_id_t low_level_head_id);
+  auto GetLowerlevelHeadId() const -> page_id_t;
+  void SetLowerlevelHeadId(page_id_t standby_id);
 
   /**
-   * 只有在 `Is{Over, Under}flowedWith` 返回 `false` 时,
+   * 只有在 `Is(Over|Under)flowedWith` 返回 `false` 时,
    * 才应该采取 Split/Merge.
    */
   auto IsOverflowed() const -> bool;
@@ -144,24 +134,24 @@ class BPlusTreePage {
    * Max number of key & value pairs in a page
    * 无论什么类型节点, 都指示最大的 key 数量.
    */
-  int max_size_;
+  int max_size_{};
 
   /**
    * Level.
    * 用于 backfix insert kv 重建路径向上回溯.
    */
-  int level_;
+  int level_{};
 
   /**
    * Backfix status.
    * 用于 backfix remove kv 向上回溯.
    */
-  BackfixStatus backfix_status_;
+  BackfixStatus backfix_status_{BackfixStatus::INVALID};
 
   /**
    * 当前 Level 下一个 Node id.
    */
-  page_id_t next_page_id_;
+  page_id_t next_page_id_{INVALID_PAGE_ID};
 
   /**
    * 是当前 Level 的起始 Node.
@@ -172,19 +162,18 @@ class BPlusTreePage {
    * Level 起始 Node 发生 Merge 后,
    * 应继续尝试 Merge.
    */
-  bool is_level_head_;
+  bool is_level_head_{};
 
   /**
-   * 若向下遍历时 `upperbound_idx == 0` 则前往此 page.
-   * 只有 Level head 才能设置此字段.
+   * 指向下一层最左侧节点.
+   * 若当前节点是最左侧 Internal 节点, 则和 `val[0]` 相等.
+   * 否则, 作为待选, 在继承来自被 `MergeToRight` 的左侧 Internal 节点时,
+   * 作为新的 `val[0]` 覆盖来自左侧的.
    *
-   * 由于向右合并,
-   * 若被合并的是其 Level 的 head,
-   * 则需要在 backfix 过程中更新此 id 为新的 Level head.
-   * 且这个过程必须和 `DeleteKvAt` 是原子的.
-   * > 在修改此字段前, 二次校验新的 id 是否是 level head.
+   * 此字段实际维护指向下层最右侧节点的 id,
+   * 当前 Level Head 通过 `val[0]` 来向 `ValueAt` 接口暴露此 id.
    */
-  // page_id_t low_level_head_id_;
+  page_id_t lowerlevel_head_id_{INVALID_PAGE_ID};
 
   /**
    * BPlusTreePage 不需要额外的锁,

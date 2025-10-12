@@ -28,6 +28,16 @@ namespace bustub {
  * including set page type, set current size, set page id, set parent id and set max page size,
  * must be called after the creation of a new page to make a valid BPlusTreeInternalPage.
  *
+ * Internal 节点, 根据 `is_level_head_` 有不同行为.
+ * Tree 中最 **左侧** 的 Internal 节点是 **特殊** 的,
+ * 拥有一个 placeholder `key[0]`, 其 `val[0]` 指向最左侧 [-inf, ...) 区间.
+ * 其他的 Internal 节点不包含此 kv.
+ *
+ * 在 `TryNewRoot` 创建 Internal 节点时,
+ * 需要手动 `ModifyKvAt()` 为其设置 placeholder `key[0]`.
+ *
+ * 对于最左侧节点, `FindIndex*` 需要根据 `is_level_head_` 对 `key[0]` 特判.
+ *
  * @param max_size Maximal size of the page
  */
 INDEX_TEMPLATE_ARGUMENTS
@@ -35,12 +45,12 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
   BUSTUB_ASSERT(max_size > 0 && static_cast<std::uint64_t>(max_size) <= INTERNAL_PAGE_SLOT_CNT_MAX, "Invalid init.");
   SetPageType(IndexPageType::INTERNAL_PAGE);
   SetMaxSize(max_size);
-  SetSize(1);
-  ModifyKvAt(0, KeyType{}, INVALID_PAGE_ID);
+  SetSize(0);
   SetLevel(-1);
   SetBackfixStatus(BackfixStatus::INVALID);
   SetNextPageId(INVALID_PAGE_ID);
   SetIsLevelHead(false);
+  SetLowerlevelHeadId(INVALID_PAGE_ID);
 }
 /**
  * @brief Helper method to get/set the key associated with input "index"(a.k.a
@@ -51,7 +61,7 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::Init(int max_size) {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::KeyAt(int index) const -> const KeyType & {
-  BUSTUB_ASSERT(0 < index && index < GetSize(), "Invalid args.");
+  BUSTUB_ASSERT(0 <= index && index < GetSize(), "Invalid args.");
   return key_array_[index];
 }
 
@@ -70,18 +80,27 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::ValueAt(int index) const -> const ValueType
 
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetHighKey() const -> const KeyType & {
-  BUSTUB_ASSERT(GetNextPageId() != INVALID_PAGE_ID, "Memory corrupted?");
+  BUSTUB_ASSERT(GetNextPageId() != INVALID_PAGE_ID, "Invalid operation.");
   return hdr_.highkey_;
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetHighKey(const KeyType &high_key) { hdr_.highkey_ = high_key; }
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetHighKey(const KeyType &high_key) {
+  BUSTUB_ASSERT(GetNextPageId() != INVALID_PAGE_ID, "Invalid operation.");
+  hdr_.highkey_ = high_key;
+}
 
 INDEX_TEMPLATE_ARGUMENTS
-auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetLowKey() const -> const KeyType & { return hdr_.lowkey_; }
+auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::GetLowKey() const -> const KeyType & {
+  BUSTUB_ASSERT(!IsLevelHead(), "Invalid operation.");
+  return hdr_.lowkey_;
+}
 
 INDEX_TEMPLATE_ARGUMENTS
-void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetLowKey(const KeyType &low_key) { hdr_.lowkey_ = low_key; }
+void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetLowKey(const KeyType &low_key) {
+  BUSTUB_ASSERT(!IsLevelHead(), "Invalid operation.");
+  hdr_.lowkey_ = low_key;
+}
 
 /**
  * InternalNode 的 `high_key_` 是 inclusive upperbound.
@@ -91,6 +110,8 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetLowKey(const KeyType &low_key) { hdr_.lo
  * 必须停止.
  * 只有最右侧的节点允许 `high_key_` invalid,
  * 被 Merge 操作清空的节点不允许设置 invalid.
+ *
+ * 考虑空的 Internal Node,
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool {
@@ -106,8 +127,8 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::CoveredKey(const KeyType &key, KeyComparato
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndexUpperbound(const KeyType &key, KeyComparator &cmp) const -> int {
-  int l{1};          // [0, l) -> x <= key.
-  int r{GetSize()};  // [r, GetSize()) -> x > key.
+  int l{IsLevelHead() ? 1 : 0};  // [0, l) -> x <= key.
+  int r{GetSize()};              // [r, GetSize()) -> x > key.
   while (r - l > 0) {
     int mid{l + ((r - l) / 2)};
     if (cmp(key_array_[mid], key) <= 0) {
@@ -125,8 +146,8 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndexUpperbound(const KeyType &key, Key
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndexLowerbound(const KeyType &key, KeyComparator &cmp) const -> int {
-  int l{1};          // [0, l) -> x < key.
-  int r{GetSize()};  // [r, GetSize()) -> x >= key.
+  int l{IsLevelHead() ? 1 : 0};  // [0, l) -> x < key.
+  int r{GetSize()};              // [r, GetSize()) -> x >= key.
   while (r - l > 0) {
     int mid{l + ((r - l) / 2)};
     if (cmp(key_array_[mid], key) < 0) {
@@ -139,12 +160,33 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::FindIndexLowerbound(const KeyType &key, Key
 }
 
 INDEX_TEMPLATE_ARGUMENTS
+auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::Locate(const KeyType &key, KeyComparator &cmp) const -> page_id_t {
+  BUSTUB_ASSERT(!IsLevelHead() || GetLowerlevelHeadId() == ValueAt(0), "Unexpected.");
+  BUSTUB_ASSERT(!(GetNextPageId() != INVALID_PAGE_ID) || cmp(key, GetHighKey()) <= 0, "Unexpected.");
+
+  int upperbound_idx{FindIndexUpperbound(key, cmp)};
+  /**
+   * 考虑当前要找的 `key` 正好存在于当前 Internal Node 中的某个 kv,
+   * 使用 lowerbound 将路由错误.
+   */
+  /**
+   * 考虑 Level Head 向右 Merge 的情况.
+   * 新的 Level Head 在 parent 中的 kv 被删除, 并被设置为 parent `lowerlevel_head_id_`.
+   * 若 parent 暂时还不是 Level Head, 即, 向右 Merge 涉及的两个节点不属于同一个 parent,
+   * 新 Level Head 的 kv 在其 parent 中是 `val[0]`,
+   * 这需要我们访问还没有立刻转为 Level Head 的 parent 的 `lowerlevel_head_id_`.
+   */
+  page_id_t lower_page_id{upperbound_idx == 0 ? GetLowerlevelHeadId() : ValueAt(upperbound_idx - 1)};
+  return lower_page_id;
+}
+
+INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::NewKvAt(int index) {
   int begin{index};
   int to{index + 1};
   int mv_cnt{GetSize() - begin};
   BUSTUB_ASSERT(mv_cnt >= 0, "Invalid args.");
-  BUSTUB_ASSERT(0 < index && index <= GetSize(), "Invalid args.");
+  BUSTUB_ASSERT(0 <= index && index <= GetSize(), "Invalid args.");
   std::memmove(key_array_ + to, key_array_ + begin, sizeof(KeyType) * mv_cnt);
   std::memmove(page_id_array_ + to, page_id_array_ + begin, sizeof(ValueType) * mv_cnt);
   SetSize(GetSize() + 1);
@@ -163,33 +205,35 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::DeleteKvAt(int index) {
   int to{index};
   int mv_cnt{GetSize() - begin};
   BUSTUB_ASSERT(mv_cnt >= 0, "Invalid args.");
-  BUSTUB_ASSERT(0 < index && index < GetSize(), "Invalid args.");
+  BUSTUB_ASSERT(0 <= index && index < GetSize(), "Invalid args.");
   std::memmove(key_array_ + to, key_array_ + begin, sizeof(KeyType) * mv_cnt);
   std::memmove(page_id_array_ + to, page_id_array_ + begin, sizeof(ValueType) * mv_cnt);
   SetSize(GetSize() - 1);
 }
 
 /**
- * WARNING: 考虑 Sibling 的 `kv[0]` 存在有效值的情况,
- * 不要覆盖 Sibling 的 `val[0]`.
+ * 关于 Level Head 的 placeholder `kv[0]` 的设置,
+ * 由上层控制.
  */
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::MergeToRight(WritePageGuard &sib_g_w) {
   auto sib_data{sib_g_w.AsMut<BPlusTreeInternalPage>()};
   BUSTUB_ASSERT(sib_data->GetSize() >= 1, "Unexpected.");
-  if (GetSize() > 1) {
-    std::memmove(sib_data->key_array_ + GetSize(), sib_data->key_array_ + 1,
-                 sizeof(KeyType) * (sib_data->GetSize() - 1));
-    std::memmove(sib_data->page_id_array_ + GetSize(), sib_data->page_id_array_ + 1,
-                 sizeof(ValueType) * (sib_data->GetSize() - 1));
-    std::memcpy(sib_data->key_array_ + 1, key_array_ + 1, sizeof(KeyType) * (GetSize() - 1));
-    std::memcpy(sib_data->page_id_array_ + 1, page_id_array_ + 1, sizeof(ValueType) * (GetSize() - 1));
+  if (GetSize() > 0) {
+    std::memmove(sib_data->key_array_ + GetSize(), sib_data->key_array_, sizeof(KeyType) * sib_data->GetSize());
+    std::memmove(sib_data->page_id_array_ + GetSize(), sib_data->page_id_array_,
+                 sizeof(ValueType) * sib_data->GetSize());
+    std::memcpy(sib_data->key_array_, key_array_, sizeof(KeyType) * GetSize());
+    std::memcpy(sib_data->page_id_array_, page_id_array_, sizeof(ValueType) * GetSize());
   }
-  if (sib_data->ValueAt(0) == INVALID_PAGE_ID) {
-    sib_data->ModifyKvAt(0, KeyType{}, ValueAt(0));
-  }
-  sib_data->SetSize(GetSize() - 1 + sib_data->GetSize());
-  SetSize(1);
+
+  sib_data->SetSize(GetSize() + sib_data->GetSize());
+  SetSize(0);
+
+  /**
+   * Do not modify `kv[0]` here.
+   * This should be done outside.
+   */
 
   /**
    * No need to set `highkey_`.
@@ -203,32 +247,31 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::MergeFromRight(WritePageGuard &sib_g_w) {
   auto sib_data{sib_g_w.AsMut<BPlusTreeInternalPage>()};
 
   if (sib_data->GetSize() > 0) {
-    std::memcpy(key_array_ + GetSize(), sib_data->key_array_ + 1, sizeof(KeyType) * (sib_data->GetSize() - 1));
-    std::memcpy(page_id_array_ + GetSize(), sib_data->page_id_array_ + 1,
-                sizeof(ValueType) * (sib_data->GetSize() - 1));
+    std::memcpy(key_array_ + GetSize(), sib_data->key_array_, sizeof(KeyType) * sib_data->GetSize());
+    std::memcpy(page_id_array_ + GetSize(), sib_data->page_id_array_, sizeof(ValueType) * sib_data->GetSize());
   }
 
-  SetSize(sib_data->GetSize() + GetSize() - 1);
-  sib_data->SetSize(1);
+  SetSize(sib_data->GetSize() + GetSize());
+  sib_data->SetSize(0);
 }
 
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SplitToRight(WritePageGuard &sib_g_w) {
   auto sib_data{sib_g_w.AsMut<BPlusTreeInternalPage>()};
   BUSTUB_ASSERT(GetSize() >= 3, "Unexpected.");
-  BUSTUB_ASSERT(sib_data->GetSize() == 1, "Unexpected.");
+  BUSTUB_ASSERT(sib_data->GetSize() == 0, "Unexpected.");
 
-  int kv_sum{GetSize() + sib_data->GetSize() - 2};
+  int kv_sum{GetSize() + sib_data->GetSize()};
   int l_kv_sum{(kv_sum + 1) / 2};
   int r_kv_sum{kv_sum / 2};
 
-  std::memcpy(sib_data->key_array_ + 1, key_array_ + GetSize() - r_kv_sum, sizeof(KeyType) * r_kv_sum);
-  std::memcpy(sib_data->page_id_array_ + 1, page_id_array_ + GetSize() - r_kv_sum, sizeof(ValueType) * r_kv_sum);
-  SetSize(1 + l_kv_sum);
-  sib_data->SetSize(1 + r_kv_sum);
+  std::memcpy(sib_data->key_array_, key_array_ + GetSize() - r_kv_sum, sizeof(KeyType) * r_kv_sum);
+  std::memcpy(sib_data->page_id_array_, page_id_array_ + GetSize() - r_kv_sum, sizeof(ValueType) * r_kv_sum);
+  SetSize(l_kv_sum);
+  sib_data->SetSize(r_kv_sum);
 
   // Init `lowkey_`.
-  sib_data->SetLowKey(sib_data->KeyAt(1));
+  sib_data->SetLowKey(sib_data->KeyAt(0));
   sib_data->SetLevel(GetLevel());
 }
 
@@ -244,56 +287,6 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::LinkToNewSibling(WritePageGuard &sib_g_w) {
   SetNextPageId(sib_g_w.GetPageId());
   SetHighKey(sib_data->GetLowKey());
 }
-
-// INDEX_TEMPLATE_ARGUMENTS
-// void B_PLUS_TREE_INTERNAL_PAGE_TYPE::RedistributeWithRight(WritePageGuard &rpage_g, int l_size, int r_size) {
-//   int l_diff_cnt{l_size - GetSize()};
-//   int r_diff_cnt{r_size - rpage_g.As<BPlusTreeInternalPage>()->GetSize()};
-
-//   BUSTUB_ASSERT(l_diff_cnt + r_diff_cnt == 0, "Invalid args.");
-
-//   auto rpage_data{rpage_g.AsMut<BPlusTreeInternalPage>()};
-
-//   if (l_diff_cnt > 0) {
-//     // l need `+l_diff_cnt` kv pairs.
-//     std::memmove(key_array_ + GetSize(), rpage_data->key_array_, sizeof(KeyType) * l_diff_cnt);
-//     std::memmove(page_id_array_ + GetSize(), rpage_data->page_id_array_, sizeof(ValueType) * l_diff_cnt);
-//     std::memmove(rpage_data->key_array_, rpage_data->key_array_ + l_diff_cnt,
-//                  sizeof(KeyType) * (rpage_data->GetSize() - l_diff_cnt));
-//     std::memmove(rpage_data->page_id_array_, rpage_data->page_id_array_ + l_diff_cnt,
-//                  sizeof(ValueType) * (rpage_data->GetSize() - l_diff_cnt));
-
-//   } else if (r_diff_cnt > 0) {
-//     // r need `+r_diff_cnt` kv pairs.
-//     std::memmove(rpage_data->key_array_ + r_diff_cnt, rpage_data->key_array_, sizeof(KeyType) *
-//     rpage_data->GetSize()); std::memmove(rpage_data->page_id_array_ + r_diff_cnt, rpage_data->page_id_array_,
-//                  sizeof(ValueType) * rpage_data->GetSize());
-//     std::memmove(rpage_data->key_array_, key_array_ + GetSize() - r_diff_cnt, sizeof(KeyType) * r_diff_cnt);
-//     std::memmove(rpage_data->page_id_array_, page_id_array_ + GetSize() - r_diff_cnt, sizeof(ValueType) *
-//     r_diff_cnt);
-//   }
-
-//   SetSize(l_size);
-//   rpage_data->SetSize(r_size);
-
-//   if (GetSize() == 0) {  // Merge to right.
-//     if (rpage_data->GetSize() != 0) {
-//       SetHighKey(rpage_data->KeyAt(0));
-//     }
-//   } else if (rpage_data->GetSize() == 0) {  // Merge to left.
-//     if (rpage_data->GetNextPageId() != INVALID_PAGE_ID) {
-//       SetHighKey(rpage_data->GetHighKey());
-//     }
-//     rpage_data->SetHighKey(KeyAt(0));
-//   } else {  // Split.
-//     BUSTUB_ASSERT(GetSize() != 0 && rpage_data->GetSize() != 0, "Invalid args.");
-//     if (GetNextPageId() != INVALID_PAGE_ID) {
-//       rpage_data->SetHighKey(GetHighKey());
-//     }
-//     rpage_data->SetLowKey(rpage_data->KeyAt(0));
-//     SetHighKey(rpage_data->KeyAt(0));
-//   }
-// }
 
 // valuetype for internalNode should be page id_t
 template class BPlusTreeInternalPage<GenericKey<4>, page_id_t, GenericComparator<4>>;

@@ -15,6 +15,8 @@
 #include <filesystem>
 #include <functional>
 #include <future>  // NOLINT
+#include <numeric>
+#include <random>
 #include <thread>  // NOLINT
 
 #include "buffer/buffer_pool_manager.h"
@@ -131,7 +133,7 @@ void InsertTest1Call() {
     page_id_t page_id = bpm->NewPage();
 
     // create b+ tree
-    BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", page_id, bpm, comparator, 3, 5);
+    BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", page_id, bpm, comparator, 2, 3);
 
     // keys to Insert
     std::vector<int64_t> keys;
@@ -186,7 +188,7 @@ void InsertTest2Call() {
     page_id_t page_id = bpm->NewPage();
 
     // create b+ tree
-    BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", page_id, bpm, comparator, 3, 5);
+    BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", page_id, bpm, comparator, 2, 3);
 
     // keys to Insert
     std::vector<int64_t> keys;
@@ -241,7 +243,7 @@ void DeleteTest1Call() {
     page_id_t page_id = bpm->NewPage();
 
     // create b+ tree
-    BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", page_id, bpm, comparator, 3, 5);
+    BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", page_id, bpm, comparator, 2, 3);
 
     // sequential insert
     std::vector<int64_t> keys = {1, 2, 3, 4, 5};
@@ -285,7 +287,7 @@ void DeleteTest2Call() {
     page_id_t page_id = bpm->NewPage();
 
     // create b+ tree
-    BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", page_id, bpm, comparator, 3, 5);
+    BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", page_id, bpm, comparator, 2, 3);
 
     // sequential insert
     std::vector<int64_t> keys = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
@@ -329,7 +331,7 @@ void MixTest1Call() {
     page_id_t page_id = bpm->NewPage();
 
     // create b+ tree
-    BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", page_id, bpm, comparator, 3, 5);
+    BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", page_id, bpm, comparator, 2, 3);
 
     // first, populate index
     std::vector<int64_t> for_insert;
@@ -352,7 +354,8 @@ void MixTest1Call() {
     tasks.emplace_back(insert_task);
     tasks.emplace_back(delete_task);
     std::vector<std::thread> threads;
-    size_t num_threads = 10;
+    size_t num_threads = 20;
+    threads.reserve(num_threads);
     for (size_t i = 0; i < num_threads; i++) {
       threads.emplace_back(tasks[i % tasks.size()], i);
     }
@@ -418,7 +421,8 @@ void MixTest2Call() {
     tasks.emplace_back(delete_task);
     tasks.emplace_back(lookup_task);
 
-    size_t num_threads = 6;
+    size_t num_threads = 20;
+    threads.reserve(num_threads);
     for (size_t i = 0; i < num_threads; i++) {
       threads.emplace_back(tasks[i % tasks.size()], i);
     }
@@ -443,27 +447,101 @@ void MixTest2Call() {
   }
 }
 
-TEST(BPlusTreeConcurrentTest, DISABLED_InsertTest1) {  // NOLINT
-  InsertTest1Call();
+void MyScaleTest1Call() {
+  for (size_t iter = 0; iter < MIXTEST_NUM_ITERS; iter++) {
+    // create KeyComparator and index schema
+    auto key_schema = ParseCreateStatement("a bigint");
+    GenericComparator<8> comparator(key_schema.get());
+
+    auto *disk_manager = new DiskManagerUnlimitedMemory();
+    auto *bpm = new BufferPoolManager(BPM_SIZE, disk_manager);
+
+    // create and fetch header_page
+    page_id_t page_id = bpm->NewPage();
+
+    // create b+ tree
+    BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", page_id, bpm, comparator, 2, 3);
+
+    // Add perserved_keys
+    size_t perserved_cnt{6};
+    std::vector<int64_t> keys(perserved_cnt, 0);
+    std::iota(keys.begin(), keys.end(), 0);
+    // std::uniform_int_distribution<> dis{42};
+    // std::mt19937 gen{42};
+    // std::shuffle(keys.begin(), keys.end(), gen);
+    InsertHelper(&tree, keys);
+    DeleteHelper(&tree, keys);
+
+    auto root_id{tree.GetRootPageId()};
+    ASSERT_EQ(root_id, INVALID_PAGE_ID);
+
+    delete disk_manager;
+    delete bpm;
+  }
+}
+void MyScaleTest2Call() {
+  for (size_t iter = 0; iter < MIXTEST_NUM_ITERS; iter++) {
+    // create KeyComparator and index schema
+    auto key_schema = ParseCreateStatement("a bigint");
+    GenericComparator<8> comparator(key_schema.get());
+
+    auto *disk_manager = new DiskManagerUnlimitedMemory();
+    auto *bpm = new BufferPoolManager(BPM_SIZE, disk_manager);
+
+    // create and fetch header_page
+    page_id_t page_id = bpm->NewPage();
+
+    // create b+ tree
+    BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", page_id, bpm, comparator, 2, 3);
+
+    // Add perserved_keys
+    size_t perserved_cnt{1000};
+    std::vector<int64_t> keys(perserved_cnt, 0);
+    std::iota(keys.begin(), keys.end(), 0);
+    // std::uniform_int_distribution<> dis{42};
+    std::mt19937 gen{42};
+    std::shuffle(keys.begin(), keys.end(), gen);
+    InsertHelper(&tree, keys);
+    DeleteHelper(&tree, keys);
+
+    auto root_id{tree.GetRootPageId()};
+    ASSERT_EQ(root_id, INVALID_PAGE_ID);
+
+    delete disk_manager;
+    delete bpm;
+  }
 }
 
-TEST(BPlusTreeConcurrentTest, DISABLED_InsertTest2) {  // NOLINT
-  InsertTest2Call();
+// TEST(BPlusTreeConcurrentTest, InsertTest1) {  // NOLINT
+//   InsertTest1Call();
+// }
+
+// TEST(BPlusTreeConcurrentTest, InsertTest2) {  // NOLINT
+//   InsertTest2Call();
+// }
+
+// TEST(BPlusTreeConcurrentTest, DeleteTest1) {  // NOLINT
+//   DeleteTest1Call();
+// }
+
+// TEST(BPlusTreeConcurrentTest, DeleteTest2) {  // NOLINT
+//   DeleteTest2Call();
+// }
+
+// TEST(BPlusTreeConcurrentTest, MixTest1) {  // NOLINT
+//   MixTest1Call();
+// }
+
+// TEST(BPlusTreeConcurrentTest, MixTest2) {  // NOLINT
+//   MixTest2Call();
+// }
+
+TEST(BPlusTreeConcurrentTest, MyScaleTest1) {  // NOLINT
+  MyScaleTest1Call();
 }
 
-TEST(BPlusTreeConcurrentTest, DISABLED_DeleteTest1) {  // NOLINT
-  DeleteTest1Call();
+TEST(BPlusTreeConcurrentTest, MyScaleTest2) {  // NOLINT
+  MyScaleTest2Call();
 }
 
-TEST(BPlusTreeConcurrentTest, DISABLED_DeleteTest2) {  // NOLINT
-  DeleteTest2Call();
-}
-
-TEST(BPlusTreeConcurrentTest, MixTest1) {  // NOLINT
-  MixTest1Call();
-}
-
-TEST(BPlusTreeConcurrentTest, MixTest2) {  // NOLINT
-  MixTest2Call();
-}
 }  // namespace bustub

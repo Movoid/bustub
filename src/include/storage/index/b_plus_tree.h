@@ -1283,7 +1283,7 @@ class BPlusTree {
   auto GoSibUntilCoverWW(WritePageGuard &page_g, const KeyType &key) -> bool;
   [[nodiscard]] auto GoSibUntilCoverRW(ReadPageGuard &&page_g, const KeyType &key) -> WritePageGuard;
 
-  void GetPathTo(int level, const KeyType &key, PathContainer &path);
+  void GetPathTo(int to_level, const KeyType &key, PathContainer &path);
 
   auto TrySplitAndGo(WritePageGuard &page_g, const KeyType &key, IndexKvPack &backfix_kv) -> bool;
   auto TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool;
@@ -1296,9 +1296,9 @@ class BPlusTree {
    * Update: 只能由 TrySplit/TryMerge 调用.
    * 因为只有 TryMerge 才有相关节点的详细信息, 才能更准确判断何时 DeleteRoot.
    */
-  auto TryNewRoot(page_id_t &new_root_id) -> bool;
-  auto TryDeleteRoot(page_id_t &new_root_id) -> bool;
-  auto TryUpdateRoot(page_id_t &new_root_id) -> bool;
+  auto TryInitLevel(const KeyType &with_key, const ValueType &with_value) -> bool;
+  auto TryExpandLevel(page_id_t &new_root_id) -> bool;
+  auto TryShrinkLevel(page_id_t &new_root_id) -> bool;
 
   auto BackfixInsertKv(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool;
 

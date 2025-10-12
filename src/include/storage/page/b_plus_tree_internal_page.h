@@ -148,6 +148,8 @@ class BPlusTreeInternalPage : public BPlusTreePage {
 
   auto FindIndexLowerbound(const KeyType &key, KeyComparator &cmp) const -> int;
 
+  auto Locate(const KeyType &key, KeyComparator &cmp) const -> page_id_t;
+
   void NewKvAt(int index);
   void ModifyKvAt(int index, const KeyType &key, const ValueType &val);
   void DeleteKvAt(int index);
