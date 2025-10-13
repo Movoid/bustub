@@ -501,6 +501,9 @@ class QSBRGuard {
   ~QSBRGuard() {
     if (mgr_) {
       mgr_->ExitCriticalZone();
+      if (mgr_->GetRetiredCntLocal() > 0) {
+        mgr_->ReclaimLocal();
+      }
     }
   }
 };
@@ -1221,8 +1224,8 @@ class BPlusTree {
   struct IndexKvPackImpl {
     KeyType key_;
     page_id_t val_;
-    bool is_level_head_{};  // Used in level head update.
-    page_id_t new_level_head_id_;
+    bool update_lowerlevel_head_{};  // Used in level head update.
+    page_id_t new_lowerlevel_head_id_;
   };
 
   using IndexKvPack = std::optional<IndexKvPackImpl>;
@@ -1279,24 +1282,24 @@ class BPlusTree {
   // auto GoByLink(const KeyType &key, ReadPageGuard &&page_g) -> ReadPageGuard;
   // auto GoByLink(const KeyType &key, WritePageGuard &&page_g) -> WritePageGuard;
 
-  auto GoSibUntilCoverRR(ReadPageGuard &page_g, const KeyType &key) -> bool;
-  auto GoSibUntilCoverWW(WritePageGuard &page_g, const KeyType &key) -> bool;
-  [[nodiscard]] auto GoSibUntilCoverRW(ReadPageGuard &&page_g, const KeyType &key) -> WritePageGuard;
+  [[nodiscard]] auto GoSibUntilCoverRR(ReadPageGuard &page_g, const KeyType &key) -> bool;
+  [[nodiscard]] auto GoSibUntilCoverWW(WritePageGuard &page_g, const KeyType &key) -> bool;
+  [[deprecated("Do not use.")]] auto GoSibUntilCoverRW(ReadPageGuard &&page_g, WritePageGuard &page_g_w,
+                                                       const KeyType &key) -> bool;
 
-  void GetPathTo(int to_level, const KeyType &key, PathContainer &path);
+  [[nodiscard]] auto GoSibUntilHeadRR(ReadPageGuard &page_g) -> bool;
+  [[nodiscard]] auto GoSibUntilHeadWW(WritePageGuard &page_g) -> bool;
+
+  [[nodiscard]] auto GoDownUntilLevel(ReadPageGuard &page_g, const KeyType &key, int to_level, PathContainer &path)
+      -> bool;
+
+  [[nodiscard]] auto GoDownUntilLeafHead(ReadPageGuard &page_g) -> bool;
+
+  [[nodiscard]] auto TryGetPathTo(const KeyType &key, int to_level, PathContainer &path) -> bool;
 
   auto TrySplitAndGo(WritePageGuard &page_g, const KeyType &key, IndexKvPack &backfix_kv) -> bool;
   auto TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool;
 
-  /**
-   * 这两个应该由 TrySplit/TryMerge 调用.
-   *
-   * Update: 也许在上层调用更好, 不应该和 Split/Merge 耦合.
-   *
-   * Update: 只能由 TrySplit/TryMerge 调用.
-   * 因为只有 TryMerge 才有相关节点的详细信息, 才能更准确判断何时 DeleteRoot.
-   */
-  auto TryInitLevel(const KeyType &with_key, const ValueType &with_value) -> bool;
   auto TryExpandLevel(page_id_t &new_root_id) -> bool;
   auto TryShrinkLevel(page_id_t &new_root_id) -> bool;
 
@@ -1332,6 +1335,8 @@ class BPlusTree {
    * 神秘小工具
    */
   simple_cu::qsbr::QSBRManager<32, page_id_t, BufferPoolManager::PageDeleter> qsbr_mgr_{{bpm_}};
+
+  static constexpr int LEAF_LEVEL{1};
 };
 
 /**

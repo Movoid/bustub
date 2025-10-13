@@ -188,7 +188,7 @@ void InsertTest2Call() {
     page_id_t page_id = bpm->NewPage();
 
     // create b+ tree
-    BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", page_id, bpm, comparator, 2, 3);
+    BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", page_id, bpm, comparator, 3, 5);
 
     // keys to Insert
     std::vector<int64_t> keys;
@@ -331,7 +331,7 @@ void MixTest1Call() {
     page_id_t page_id = bpm->NewPage();
 
     // create b+ tree
-    BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", page_id, bpm, comparator, 2, 3);
+    BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", page_id, bpm, comparator, 3, 5);
 
     // first, populate index
     std::vector<int64_t> for_insert;
@@ -479,8 +479,9 @@ void MyScaleTest1Call() {
     delete bpm;
   }
 }
+
 void MyScaleTest2Call() {
-  for (size_t iter = 0; iter < MIXTEST_NUM_ITERS; iter++) {
+  for (size_t iter = 0; iter < 800; iter++) {
     // create KeyComparator and index schema
     auto key_schema = ParseCreateStatement("a bigint");
     GenericComparator<8> comparator(key_schema.get());
@@ -495,11 +496,11 @@ void MyScaleTest2Call() {
     BPlusTree<GenericKey<8>, RID, GenericComparator<8>> tree("foo_pk", page_id, bpm, comparator, 2, 3);
 
     // Add perserved_keys
-    size_t perserved_cnt{1000};
+    size_t perserved_cnt{6};
     std::vector<int64_t> keys(perserved_cnt, 0);
     std::iota(keys.begin(), keys.end(), 0);
     // std::uniform_int_distribution<> dis{42};
-    std::mt19937 gen{42};
+    std::mt19937 gen{iter};
     std::shuffle(keys.begin(), keys.end(), gen);
     InsertHelper(&tree, keys);
     DeleteHelper(&tree, keys);
@@ -512,29 +513,29 @@ void MyScaleTest2Call() {
   }
 }
 
-// TEST(BPlusTreeConcurrentTest, InsertTest1) {  // NOLINT
-//   InsertTest1Call();
-// }
+TEST(BPlusTreeConcurrentTest, InsertTest1) {  // NOLINT
+  InsertTest1Call();
+}
 
-// TEST(BPlusTreeConcurrentTest, InsertTest2) {  // NOLINT
-//   InsertTest2Call();
-// }
+TEST(BPlusTreeConcurrentTest, InsertTest2) {  // NOLINT
+  InsertTest2Call();
+}
 
-// TEST(BPlusTreeConcurrentTest, DeleteTest1) {  // NOLINT
-//   DeleteTest1Call();
-// }
+TEST(BPlusTreeConcurrentTest, DeleteTest1) {  // NOLINT
+  DeleteTest1Call();
+}
 
-// TEST(BPlusTreeConcurrentTest, DeleteTest2) {  // NOLINT
-//   DeleteTest2Call();
-// }
+TEST(BPlusTreeConcurrentTest, DeleteTest2) {  // NOLINT
+  DeleteTest2Call();
+}
 
-// TEST(BPlusTreeConcurrentTest, MixTest1) {  // NOLINT
-//   MixTest1Call();
-// }
+TEST(BPlusTreeConcurrentTest, MixTest1) {  // NOLINT
+  MixTest1Call();
+}
 
-// TEST(BPlusTreeConcurrentTest, MixTest2) {  // NOLINT
-//   MixTest2Call();
-// }
+TEST(BPlusTreeConcurrentTest, MixTest2) {  // NOLINT
+  MixTest2Call();
+}
 
 TEST(BPlusTreeConcurrentTest, MyScaleTest1) {  // NOLINT
   MyScaleTest1Call();

@@ -96,7 +96,10 @@ void BPlusTreePage::SetBackfixStatus(BackfixStatus status) {
   backfix_status_ = status;
 }
 
-auto BPlusTreePage::GetNextPageId() const -> page_id_t { return next_page_id_; }
+auto BPlusTreePage::GetNextPageId() const -> page_id_t {
+  BUSTUB_ASSERT(next_page_id_ != 0, "Unexpected.");
+  return next_page_id_;
+}
 
 void BPlusTreePage::SetNextPageId(page_id_t next_page_id) { next_page_id_ = next_page_id; }
 
@@ -111,9 +114,13 @@ void BPlusTreePage::SetLowerlevelHeadId(page_id_t standby_id) {
   lowerlevel_head_id_ = standby_id;
 }
 
-auto BPlusTreePage::IsOverflowed() const -> bool { return GetSize() >= GetMaxSize(); }
+/**
+ * Internal Node 至少要有 2 Kv. 且不能完全满.
+ * 否则考虑 Level Head Internal Node 有 1 Kv, 其 Sibling 满,
+ * Level Head 永远无法触发 `MergeToRight`.
+ */
+auto BPlusTreePage::IsOverflowed() const -> bool { return GetSize() >= GetMaxSize() - static_cast<int>(!IsLeafPage()); }
 
-/** 无法通过均分解决 Overflow. */
 auto BPlusTreePage::IsOverflowedAfterMergeWith(WritePageGuard &rpage_g) const -> bool {
   int cnt_sum{GetSize() + rpage_g.As<BPlusTreePage>()->GetSize()};
   return cnt_sum > GetMaxSize();

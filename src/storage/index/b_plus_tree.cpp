@@ -35,6 +35,7 @@ BPLUSTREE_TYPE::BPlusTree(std::string name, page_id_t header_page_id, BufferPool
   WritePageGuard tree_header_g_w{bpm_->WritePage(header_page_id_)};
   auto tree_header_data{tree_header_g_w.AsMut<BPlusTreeHeaderPage>()};
   tree_header_data->root_page_id_ = INVALID_PAGE_ID;
+  fmt::println("BPlusTree: leaf_max_size {}, internal_max_size {}.", leaf_max_size, internal_max_size);
 }
 
 /**
@@ -70,37 +71,35 @@ auto BPLUSTREE_TYPE::IsEmpty() const -> bool {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result) -> bool {
-  qsbr_mgr_.EnterCriticalZone();
-  page_id_t cur_root_id{GetRootPageId()};
+  while (true) {
+    simple_cu::qsbr::QSBRGuard qsbr_guard{qsbr_mgr_};
 
-  if (cur_root_id == INVALID_PAGE_ID) {
-    return false;
-  }
+    page_id_t cur_root_id{GetRootPageId()};
 
-  ReadPageGuard page_g{bpm_->ReadPage(cur_root_id)};
-  GoSibUntilCoverRR(page_g, key);
-  while (!page_g.As<BPlusTreePage>()->IsLeafPage()) {
-    auto page_data{page_g.As<InternalPage>()};
-    page_id_t next_id{page_data->Locate(key, comparator_)};
-    page_g.Drop();
-    page_g = bpm_->ReadPage(next_id);
-    GoSibUntilCoverRR(page_g, key);
-  }
+    if (cur_root_id == INVALID_PAGE_ID) {
+      return false;
+    }
 
-  BUSTUB_ASSERT(page_g.As<BPlusTreePage>()->IsLeafPage(), "Unexpected.");
-  auto page_data{page_g.As<LeafPage>()};
-  bool is_found{};
-  int lowerbound_idx{page_data->FindIndexLowerbound(key, comparator_)};
-  if (lowerbound_idx != page_data->GetSize() && comparator_(page_data->KeyAt(lowerbound_idx), key) == 0) {
+    PathContainer path{};  // Not neccessary.
+    ReadPageGuard page_g{bpm_->ReadPage(cur_root_id)};
+
+    if (!GoDownUntilLevel(page_g, key, LEAF_LEVEL, path)) {
+      continue;  // Restart.
+    }
+
+    if (!GoSibUntilCoverRR(page_g, key)) {
+      continue;
+    }
+
+    BUSTUB_ASSERT(page_g.As<BPlusTreePage>()->IsLeafPage(), "Unexpected.");
+    auto page_data{page_g.As<LeafPage>()};
+    int lowerbound_idx{page_data->FindIndexLowerbound(key, comparator_)};
+    if (lowerbound_idx == page_data->GetSize() || comparator_(page_data->KeyAt(lowerbound_idx), key) != 0) {
+      return false;
+    }
     result->emplace_back(page_data->ValueAt(lowerbound_idx));
-    is_found = true;
+    return true;
   }
-
-  qsbr_mgr_.ExitCriticalZone();
-  if (qsbr_mgr_.GetRetiredCntLocal() > 0) {
-    qsbr_mgr_.ReclaimLocal();
-  }
-  return is_found;
 }
 
 /*****************************************************************************
@@ -122,109 +121,119 @@ auto BPLUSTREE_TYPE::GetValue(const KeyType &key, std::vector<ValueType> *result
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool {
-  qsbr_mgr_.EnterCriticalZone();  // Remember to exit!
-  page_id_t cur_root_id{GetRootPageId()};
+  while (true) {
+    simple_cu::qsbr::QSBRGuard qsbr_guard{qsbr_mgr_};
 
-  // Insert/Split 不会变化 `cur_root_id`, 不需要频繁更新.
+    page_id_t cur_root_id{GetRootPageId()};
 
-  if (cur_root_id == INVALID_PAGE_ID) {
-    TryExpandLevel(cur_root_id);
-    BUSTUB_ASSERT(cur_root_id != INVALID_PAGE_ID, "Unexpected.");
-  }
+    if (cur_root_id == INVALID_PAGE_ID) {
+      TryExpandLevel(cur_root_id);
+      continue;  // Restart.
+    }
+    PathContainer backfix_path{};
+    IndexKvPack backfix_kv{std::nullopt};
 
-  PathContainer backfix_path{};
-  IndexKvPack backfix_kv{std::nullopt};
-
-  // Locate.
-  {
+    // Locate.
     ReadPageGuard page_g{bpm_->ReadPage(cur_root_id)};
-    GoSibUntilCoverRR(page_g, key);
-    while (!page_g.As<BPlusTreePage>()->IsLeafPage()) {
-      // Is internal node. Go down.
-      backfix_path.EmplaceBack(page_g.GetPageId());
-      auto page_data{page_g.As<InternalPage>()};
-      page_id_t next_id{page_data->Locate(key, comparator_)};
-      page_g.Drop();
-      page_g = bpm_->ReadPage(next_id);
-      GoSibUntilCoverRR(page_g, key);
+
+    if (!GoDownUntilLevel(page_g, key, LEAF_LEVEL, backfix_path)) {
+      continue;
+    }
+    BUSTUB_ASSERT(backfix_path.Size() >= 1, "Unexpected.");
+    BUSTUB_ASSERT(backfix_path.Back() == page_g.GetPageId(), "Unexpected.");
+    backfix_path.PopBack();
+
+    page_id_t tmp{page_g.GetPageId()};
+    page_g.Drop();
+    WritePageGuard leaf_g_w{bpm_->WritePage(tmp)};
+    if (!GoSibUntilCoverWW(leaf_g_w, key)) {
+      continue;
     }
 
-    WritePageGuard leaf_g_w{GoSibUntilCoverRW(std::move(page_g), key)};
+    bool locate_ok{true};
+    // Split.
     page_id_t last_leaf_id{leaf_g_w.GetPageId()};
-    // Split
     while (TrySplitAndGo(leaf_g_w, key, backfix_kv)) {
       last_leaf_id = leaf_g_w.GetPageId();
       leaf_g_w.Drop();
 
       // Drop and start backfix.
       PathContainer cur_backfix_path{backfix_path};
-      int next_level{2};
+      int next_level{LEAF_LEVEL + 1};
 
       while (backfix_kv.has_value()) {
         auto &[backfix_key, backfix_val, ign1, ign2]{backfix_kv.value()};
         if (cur_backfix_path.Empty()) {
-          TryExpandLevel(cur_root_id);
-          cur_backfix_path.Clear();
-          GetPathTo(next_level, backfix_key, cur_backfix_path);
-          if (cur_backfix_path.Empty()) {
-            // Backfix Task 可能被取消, 需要重新检查.
-            {
-              ReadPageGuard check_page_g{bpm_->ReadPage(backfix_val)};
-              auto check_page_header_data{check_page_g.As<BPlusTreePage>()};
-              if (check_page_header_data->GetBackfixStatus() != BackfixStatus::NEED_LINK) {
-                backfix_kv = std::nullopt;
-                break;
-              }
+          // Check backfix status.
+          {
+            ReadPageGuard check_page_g{bpm_->ReadPage(backfix_val)};
+            auto check_page_header_data{check_page_g.As<BPlusTreePage>()};
+            if (check_page_header_data->GetBackfixStatus() != BackfixStatus::NEED_LINK) {
+              backfix_kv = std::nullopt;
+              break;
             }
           }
-          continue;
+          TryExpandLevel(cur_root_id);
+          if (!TryGetPathTo(backfix_key, next_level, cur_backfix_path)) {
+            cur_backfix_path.Clear();
+            continue;
+          }
+          BUSTUB_ASSERT(!cur_backfix_path.Empty(), "Unexpected.");
         }
         {
           WritePageGuard page_g_w{bpm_->WritePage(cur_backfix_path.Back())};
-          GoSibUntilCoverWW(page_g_w, backfix_key);
+          /**
+           * `backfix_path` 中的路径可能已经失效.
+           */
+          if (!GoSibUntilCoverWW(page_g_w, backfix_key)) {
+            cur_backfix_path.Clear();
+            continue;
+          }
           auto page_header_data{page_g_w.As<BPlusTreePage>()};
           BUSTUB_ASSERT(!page_header_data->IsLeafPage(), "Unexpected.");
           BUSTUB_ASSERT(page_header_data->GetLevel() == next_level, "Unexpected.");
           auto page_data{page_g_w.AsMut<InternalPage>()};
-          if (!page_data->CoveredKey(backfix_key, comparator_)) {
-            // As protocol, this is level is deleted.
-            // The backfix task should be `DONT_LINK`.
-            backfix_kv = std::nullopt;
-            break;
-          }
+          BUSTUB_ASSERT(page_data->CoveredKey(backfix_key, comparator_), "Unexpected.");
           BackfixInsertKv(page_g_w, backfix_kv);
         }
         next_level++;
         cur_backfix_path.PopBack();
       }
       leaf_g_w = bpm_->WritePage(last_leaf_id);  // Go back to leaf.
-      GoSibUntilCoverWW(leaf_g_w, key);
+      if (!GoSibUntilCoverWW(leaf_g_w, key)) {
+        /**
+         * Locate 失败, 必须重启 `Insert`.
+         */
+        locate_ok = false;
+        break;
+      }
       last_leaf_id = leaf_g_w.GetPageId();  // Record.
     }
-    auto page_data{leaf_g_w.AsMut<LeafPage>()};
-    BUSTUB_ASSERT(!page_data->IsOverflowed(), "Unexpected.");
+
+    if (!locate_ok) {
+      continue;
+    }
+
+    auto leaf_data{leaf_g_w.AsMut<LeafPage>()};
+    BUSTUB_ASSERT(!leaf_data->IsOverflowed(), "Unexpected.");
+    BUSTUB_ASSERT(leaf_data->CoveredKey(key, comparator_), "Unexpected.");
     // Insert.
-    int upperbound_idx{page_data->FindIndexUpperbound(key, comparator_)};
+    int upperbound_idx{leaf_data->FindIndexUpperbound(key, comparator_)};
 
     // BUSTUB_ASSERT(page_data->IsLevelHead() || upperbound_idx > 0, "Unexpected.");
-    BUSTUB_ASSERT(page_data->IsLevelHead() || comparator_(page_data->GetLowKey(), key) <= 0, "Unexpected.");
-    BUSTUB_ASSERT(page_data->GetNextPageId() == INVALID_PAGE_ID || comparator_(key, page_data->GetHighKey()) < 0,
+    BUSTUB_ASSERT(leaf_data->IsLevelHead() || comparator_(leaf_data->GetLowKey(), key) <= 0, "Unexpected.");
+    BUSTUB_ASSERT(leaf_data->GetNextPageId() == INVALID_PAGE_ID || comparator_(key, leaf_data->GetHighKey()) < 0,
                   "Unexpected.");
 
     // 查重
-    if (upperbound_idx > 0 && comparator_(page_data->KeyAt(upperbound_idx - 1), key) == 0) {
-      qsbr_mgr_.ExitCriticalZone();
+    if (upperbound_idx > 0 && comparator_(leaf_data->KeyAt(upperbound_idx - 1), key) == 0) {
       return false;
     }
-    page_data->NewKvAt(upperbound_idx);
-    page_data->ModifyKvAt(upperbound_idx, key, value);
-  }
+    leaf_data->NewKvAt(upperbound_idx);
+    leaf_data->ModifyKvAt(upperbound_idx, key, value);
 
-  qsbr_mgr_.ExitCriticalZone();
-  if (qsbr_mgr_.GetRetiredCntLocal() > 0) {
-    qsbr_mgr_.ReclaimLocal();
+    return true;
   }
-  return true;
 }
 
 /*****************************************************************************
@@ -244,101 +253,108 @@ auto BPLUSTREE_TYPE::Insert(const KeyType &key, const ValueType &value) -> bool 
  */
 INDEX_TEMPLATE_ARGUMENTS
 void BPLUSTREE_TYPE::Remove(const KeyType &key) {
-  qsbr_mgr_.EnterCriticalZone();
-  page_id_t cur_root_id{GetRootPageId()};
+  while (true) {
+    simple_cu::qsbr::QSBRGuard qsbr_guard{qsbr_mgr_};
 
-  // Merge 会改变 `cur_root_id`.
-
-  if (cur_root_id == INVALID_PAGE_ID) {
-    qsbr_mgr_.ExitCriticalZone();
-    return;
-  }
-
-  PathContainer backfix_path{};
-  IndexKvPack backfix_kv{std::nullopt};
-  bool try_delete_root_hint{};
-
-  {
-    ReadPageGuard page_g{bpm_->ReadPage(cur_root_id)};
-    GoSibUntilCoverRR(page_g, key);
-    while (!page_g.As<BPlusTreePage>()->IsLeafPage()) {
-      backfix_path.EmplaceBack(page_g.GetPageId());
-      auto page_data{page_g.As<InternalPage>()};
-      page_id_t next_id{page_data->Locate(key, comparator_)};
-      page_g.Drop();
-      page_g = bpm_->ReadPage(next_id);
-      GoSibUntilCoverRR(page_g, key);
-    }
-    WritePageGuard leaf_g_w{GoSibUntilCoverRW(std::move(page_g), key)};
-    auto leaf_data{leaf_g_w.AsMut<LeafPage>()};
-    int lowerbound_idx{leaf_data->FindIndexLowerbound(key, comparator_)};
-    if (lowerbound_idx == leaf_data->GetSize() || comparator_(leaf_data->KeyAt(lowerbound_idx), key) != 0) {
-      // BUSTUB_ASSERT(false, "Unexpected.");
-      qsbr_mgr_.ExitCriticalZone();
+    page_id_t cur_root_id{GetRootPageId()};
+    if (cur_root_id == INVALID_PAGE_ID) {
       return;
     }
-    leaf_data->DeleteKvAt(lowerbound_idx);
 
-    try_delete_root_hint |=
-        leaf_data->GetSize() == 0 && leaf_data->IsLevelHead() && leaf_data->GetNextPageId() == INVALID_PAGE_ID;
+    PathContainer backfix_path{};
+    IndexKvPack backfix_kv{std::nullopt};
+    bool try_delete_root_hint{};
+    ReadPageGuard page_g{bpm_->ReadPage(cur_root_id)};
 
-    // Merge.
-    page_id_t last_leaf_id{leaf_g_w.GetPageId()};
-    while (TryMergeAndGo(leaf_g_w, backfix_kv)) {
-      try_delete_root_hint |= true;
-      last_leaf_id = leaf_g_w.GetPageId();
-      leaf_g_w.Drop();
+    if (!GoDownUntilLevel(page_g, key, LEAF_LEVEL, backfix_path)) {
+      continue;
+    }
 
-      // Drop and start backfix.
-      PathContainer cur_backfix_path{backfix_path};
-      int next_level{2};
-      while (backfix_kv.has_value()) {
-        auto &[backfix_key, backfix_val, ign1, ign2]{backfix_kv.value()};
-
-        if (cur_backfix_path.Empty()) {
-          cur_backfix_path.Clear();
-          GetPathTo(next_level, backfix_key, cur_backfix_path);
-          BUSTUB_ASSERT(!cur_backfix_path.Empty(), "Unexpected.");
-        }
-        {
-          WritePageGuard page_g{bpm_->WritePage(cur_backfix_path.Back())};
-          BUSTUB_ASSERT(!page_g.As<BPlusTreePage>()->IsLeafPage(), "Unexpected.");
-          GoSibUntilCoverWW(page_g, backfix_key);
-          // 这里可能到达一个被删除的 Root.
-          auto page_data{page_g.As<InternalPage>()};
-          auto page_status{page_data->GetBackfixStatus()};
-          if (page_status == BackfixStatus::IS_UNLINKED || page_status == BackfixStatus::NEED_UNLINK) {
-            page_g.Drop();
-            cur_backfix_path.Clear();
-            GetPathTo(next_level, backfix_key, cur_backfix_path);
-            continue;
-          }
-          BackfixRemoveKv(page_g, backfix_kv);
-          // auto page_data{page_g.As<InternalPage>()};
-          page_data = page_g.As<InternalPage>();
-          try_delete_root_hint |=
-              page_data->GetSize() == 0 && page_data->IsLevelHead() && page_data->GetNextPageId() == INVALID_PAGE_ID;
-        }
-        next_level++;
-        cur_backfix_path.PopBack();
+    BUSTUB_ASSERT(backfix_path.Size() >= 1, "Unexpected.");
+    BUSTUB_ASSERT(backfix_path.Back() == page_g.GetPageId(), "Unexpected.");
+    backfix_path.PopBack();
+    page_id_t tmp{page_g.GetPageId()};
+    page_g.Drop();
+    {
+      WritePageGuard leaf_g_w{bpm_->WritePage(tmp)};
+      if (!GoSibUntilCoverWW(leaf_g_w, key)) {
+        continue;
       }
 
-      leaf_g_w = bpm_->WritePage(last_leaf_id);
-      // 此处不要 GoSib , 否则可能会跳过可以 Merge 的节点.
-      last_leaf_id = leaf_g_w.GetPageId();
-    }
-  }
+      auto leaf_data{leaf_g_w.AsMut<LeafPage>()};
 
-  // 这里应该让 TryDeleteRoot 自己寻找 root id.
-  if (try_delete_root_hint) {
-    while (cur_root_id != INVALID_PAGE_ID && TryShrinkLevel(cur_root_id)) {
-      ;
-    }
-  }
+      BUSTUB_ASSERT(leaf_data->CoveredKey(key, comparator_), "Unexpected.");
 
-  qsbr_mgr_.ExitCriticalZone();
-  if (qsbr_mgr_.GetRetiredCntLocal() > 0) {
-    qsbr_mgr_.ReclaimLocal();
+      int lowerbound_idx{leaf_data->FindIndexLowerbound(key, comparator_)};
+      if (lowerbound_idx == leaf_data->GetSize() || comparator_(leaf_data->KeyAt(lowerbound_idx), key) != 0) {
+        return;
+      }
+      leaf_data->DeleteKvAt(lowerbound_idx);
+
+      try_delete_root_hint |=
+          leaf_data->GetSize() == 0 && leaf_data->IsLevelHead() && leaf_data->GetNextPageId() == INVALID_PAGE_ID;
+
+      // Merge.
+      page_id_t last_leaf_id{leaf_g_w.GetPageId()};
+      while (TryMergeAndGo(leaf_g_w, backfix_kv)) {
+        try_delete_root_hint |= true;
+        last_leaf_id = leaf_g_w.GetPageId();
+        leaf_g_w.Drop();
+
+        // Drop and start backfix.
+        PathContainer cur_backfix_path{backfix_path};
+        int next_level{2};
+        while (backfix_kv.has_value()) {
+          auto &[backfix_key, backfix_val, ign1, ign2]{backfix_kv.value()};
+          while (cur_backfix_path.Empty()) {
+            if (TryGetPathTo(backfix_key, next_level, cur_backfix_path)) {
+              break;
+            }
+          }
+          BUSTUB_ASSERT(!cur_backfix_path.Empty(), "Unexpected.");
+          {
+            WritePageGuard page_g{bpm_->WritePage(cur_backfix_path.Back())};
+            BUSTUB_ASSERT(!page_g.As<BPlusTreePage>()->IsLeafPage(), "Unexpected.");
+            /**
+             * node1 发生 MergeToRight 并生成 `backfix_kv`,
+             * 只能确定 node1 parent 的 Level 应该存在 `NEED_UNLINK` 的 kv,
+             * 但更高 Level 不确定.
+             */
+            if (!GoSibUntilCoverWW(page_g, backfix_key)) {
+              cur_backfix_path.Clear();
+              continue;
+              // BUSTUB_ASSERT(false, "Unexpected.");
+            }
+            auto page_data{page_g.As<InternalPage>()};
+            BUSTUB_ASSERT(page_data->CoveredKey(backfix_key, comparator_), "Unexpected.");
+            BackfixRemoveKv(page_g, backfix_kv);
+            page_data = page_g.As<InternalPage>();
+            try_delete_root_hint |=
+                page_data->GetSize() == 0 && page_data->IsLevelHead() && page_data->GetNextPageId() == INVALID_PAGE_ID;
+          }
+          next_level++;
+          cur_backfix_path.PopBack();
+        }
+
+        leaf_g_w = bpm_->WritePage(last_leaf_id);
+        /**
+         * 应该一直走到 Level Head.
+         */
+        if (!GoSibUntilHeadWW(leaf_g_w)) {
+          break;
+        }
+        last_leaf_id = leaf_g_w.GetPageId();
+      }
+    }
+
+    // 这里应该让 TryDeleteRoot 自己寻找 root id.
+    if (try_delete_root_hint) {
+      while (cur_root_id != INVALID_PAGE_ID && TryShrinkLevel(cur_root_id)) {
+        ;
+      }
+    }
+
+    return;
   }
 }
 
@@ -355,46 +371,30 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key) {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE {
-  qsbr_mgr_.EnterCriticalZone();
-  page_id_t cur_root_id{GetRootPageId()};
-  if (cur_root_id == INVALID_PAGE_ID) {
-    return INDEXITERATOR_TYPE{std::nullopt, bpm_};
-  }
-  ReadPageGuard page_g{bpm_->ReadPage(cur_root_id)};
-  while (!page_g.As<BPlusTreePage>()->IsLeafPage()) {
-    auto page_data{page_g.As<InternalPage>()};
+  while (true) {
+    simple_cu::qsbr::QSBRGuard qsbr_guard{qsbr_mgr_};
 
-    // 必须向右走到 Level Head.
-    page_id_t next_id{INVALID_PAGE_ID};
-    if (!page_data->IsLevelHead()) {
-      BUSTUB_ASSERT(page_data->GetNextPageId() != INVALID_PAGE_ID, "Unexpected.");
-      next_id = page_data->GetNextPageId();
-    } else {
-      next_id = page_data->GetLowerlevelHeadId();
+    page_id_t cur_root_id{GetRootPageId()};
+    if (cur_root_id == INVALID_PAGE_ID) {
+      return INDEXITERATOR_TYPE{std::nullopt, bpm_};
     }
 
-    page_g.Drop();
-    page_g = bpm_->ReadPage(next_id);
-  }
-  BUSTUB_ASSERT(page_g.As<BPlusTreePage>()->IsLeafPage(), "Unexpected.");
+    ReadPageGuard page_g{bpm_->ReadPage(cur_root_id)};
 
-  auto page_data{page_g.As<LeafPage>()};
-  while (!page_data->IsLevelHead() && page_data->GetNextPageId() != INVALID_PAGE_ID) {
-    BUSTUB_ASSERT(page_data->GetSize() == 0, "Unexpected.");
-    page_id_t sib_id{page_data->GetNextPageId()};
-    page_g.Drop();
-    page_g = bpm_->ReadPage(sib_id);
-    page_data = page_g.As<LeafPage>();
-  }
+    if (!GoDownUntilLeafHead(page_g)) {
+      continue;
+    }
 
-  BUSTUB_ASSERT(page_data->IsLevelHead(), "Unexpected.");
+    auto page_header_data{page_g.As<BPlusTreePage>()};
+    BUSTUB_ASSERT(page_header_data->IsLevelHead(), "Unexpected.");
+    BUSTUB_ASSERT(page_header_data->GetBackfixStatus() == BackfixStatus::IS_LINKED, "Protocol error.");
 
-  if (page_data->GetSize() == 0) {
-    qsbr_mgr_.ExitCriticalZone();
-    return INDEXITERATOR_TYPE{std::nullopt, bpm_};
+    auto page_data{page_g.As<LeafPage>()};
+    if (page_data->GetSize() == 0) {
+      return INDEXITERATOR_TYPE{std::nullopt, bpm_};
+    }
+    return INDEXITERATOR_TYPE{std::move(page_g), 0, bpm_};
   }
-  qsbr_mgr_.ExitCriticalZone();
-  return INDEXITERATOR_TYPE{std::move(page_g), 0, bpm_};
 }
 
 /**
@@ -404,38 +404,30 @@ auto BPLUSTREE_TYPE::Begin() -> INDEXITERATOR_TYPE {
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::Begin(const KeyType &key) -> INDEXITERATOR_TYPE {
-  qsbr_mgr_.EnterCriticalZone();
-  page_id_t cur_root_id{GetRootPageId()};
-  if (cur_root_id == INVALID_PAGE_ID) {
-    qsbr_mgr_.ExitCriticalZone();
-    return INDEXITERATOR_TYPE{std::nullopt, bpm_};
-  }
-  ReadPageGuard page_g{bpm_->ReadPage(cur_root_id)};
-  GoSibUntilCoverRR(page_g, key);
-  while (!page_g.As<BPlusTreePage>()->IsLeafPage()) {
-    // Is internal node. Go down.
-    auto page_data{page_g.As<InternalPage>()};
+  while (true) {
+    simple_cu::qsbr::QSBRGuard qsbr_guard{qsbr_mgr_};
 
-    // 必须向右走到 Level Head.
-    page_id_t next_id{INVALID_PAGE_ID};
-    if (!page_data->IsLevelHead()) {
-      BUSTUB_ASSERT(page_data->GetNextPageId() != INVALID_PAGE_ID, "Unexpected.");
-      next_id = page_data->GetNextPageId();
-    } else {
-      next_id = page_data->Locate(key, comparator_);
+    page_id_t cur_root_id{GetRootPageId()};
+
+    if (cur_root_id == INVALID_PAGE_ID) {
+      return INDEXITERATOR_TYPE{std::nullopt, bpm_};
     }
 
-    page_g.Drop();
-    page_g = bpm_->ReadPage(next_id);
-    GoSibUntilCoverRR(page_g, key);
+    PathContainer path{};
+
+    ReadPageGuard page_g{bpm_->ReadPage(cur_root_id)};
+    if (!GoDownUntilLevel(page_g, key, LEAF_LEVEL, path)) {
+      continue;
+    }
+
+    auto page_header_data{page_g.As<BPlusTreePage>()};
+    BUSTUB_ASSERT(page_header_data->IsLeafPage(), "Unexpected.");
+    auto page_data{page_g.As<LeafPage>()};
+    int lowerbound_idx{page_data->FindIndexLowerbound(key, comparator_)};
+    BUSTUB_ASSERT(lowerbound_idx < page_data->GetSize(), "Invalid args.");
+    BUSTUB_ASSERT(comparator_(page_data->KeyAt(lowerbound_idx), key) == 0, "Invalid args.");
+    return INDEXITERATOR_TYPE{std::move(page_g), lowerbound_idx, bpm_};
   }
-  BUSTUB_ASSERT(page_g.As<BPlusTreePage>()->IsLeafPage(), "Unexpected.");
-  auto page_data{page_g.As<LeafPage>()};
-  int lowerbound_idx{page_data->FindIndexLowerbound(key, comparator_)};
-  BUSTUB_ASSERT(lowerbound_idx < page_data->GetSize(), "Invalid args.");
-  BUSTUB_ASSERT(comparator_(page_data->KeyAt(lowerbound_idx), key) == 0, "Invalid args.");
-  qsbr_mgr_.ExitCriticalZone();
-  return INDEXITERATOR_TYPE{std::move(page_g), lowerbound_idx, bpm_};
 }
 
 /**
@@ -463,14 +455,9 @@ auto BPLUSTREE_TYPE::GetRootPageId() const -> page_id_t {
  * 辅助函数.
  * 在走到最右侧 Sibling 时必须停止,
  * 最右侧的 Sibling 其 `high_key_` 应该表示 +inf.
- *
- * 使用 `std::move` 来赋值 `page_g` 实际是 Lock Coupling,
- * 后续尝试修改为 Optimistic.
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::GoSibUntilCoverRR(ReadPageGuard &page_g, const KeyType &key) -> bool {
-  bool ret{};
-
   auto page_header_data{page_g.As<BPlusTreePage>()};
   while (true) {
     if (page_header_data->IsLeafPage()) {
@@ -484,20 +471,20 @@ auto BPLUSTREE_TYPE::GoSibUntilCoverRR(ReadPageGuard &page_g, const KeyType &key
         break;
       }
     }
-    ret = true;
     page_id_t next_id{page_header_data->GetNextPageId()};
-    BUSTUB_ASSERT(next_id != INVALID_PAGE_ID, "Unexpected.");
+    if (next_id == INVALID_PAGE_ID) {
+      BUSTUB_ASSERT(page_header_data->GetBackfixStatus() == BackfixStatus::IS_UNLINKED, "Protocol error.");
+      return false;
+    }
     page_g.Drop();
     page_g = bpm_->ReadPage(next_id);
     page_header_data = page_g.As<BPlusTreePage>();
   }
-  return ret;
+  return true;
 }
 
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::GoSibUntilCoverWW(WritePageGuard &page_g, const KeyType &key) -> bool {
-  bool ret{};
-
   auto page_header_data{page_g.As<BPlusTreePage>()};
   while (true) {
     if (page_header_data->IsLeafPage()) {
@@ -511,136 +498,134 @@ auto BPLUSTREE_TYPE::GoSibUntilCoverWW(WritePageGuard &page_g, const KeyType &ke
         break;
       }
     }
-    ret = true;
     page_id_t next_id{page_header_data->GetNextPageId()};
-    BUSTUB_ASSERT(next_id != INVALID_PAGE_ID, "Unexpected.");
+    if (next_id == INVALID_PAGE_ID) {
+      BUSTUB_ASSERT(page_header_data->GetBackfixStatus() == BackfixStatus::IS_UNLINKED, "Protocol error.");
+      return false;
+    }
     page_g.Drop();
     page_g = bpm_->WritePage(next_id);
     page_header_data = page_g.As<BPlusTreePage>();
   }
-  return ret;
+  return true;
 }
 
 INDEX_TEMPLATE_ARGUMENTS
-auto BPLUSTREE_TYPE::GoSibUntilCoverRW(ReadPageGuard &&page_g, const KeyType &key) -> WritePageGuard {
-  if (page_g.As<BPlusTreePage>()->IsLeafPage()) {  // leaf
-    while (!page_g.As<LeafPage>()->CoveredKey(key, comparator_)) {
-      auto page_data{page_g.As<LeafPage>()};
-      page_id_t next_page_id{page_data->GetNextPageId()};
-      if (next_page_id == INVALID_PAGE_ID) {
-        break;
-      }
-      page_g.Drop();
-      page_g = bpm_->ReadPage(next_page_id);
-    }
-  } else {  // internal
-    while (!page_g.As<InternalPage>()->CoveredKey(key, comparator_)) {
-      auto page_data{page_g.As<InternalPage>()};
-      page_id_t next_page_id{page_data->GetNextPageId()};
-      if (next_page_id == INVALID_PAGE_ID) {
-        break;
-      }
-      page_g.Drop();
-      page_g = bpm_->ReadPage(next_page_id);
-    }
+auto BPLUSTREE_TYPE::GoSibUntilCoverRW(ReadPageGuard &&page_g, WritePageGuard &page_g_w, const KeyType &key) -> bool {
+  if (!GoSibUntilCoverRR(page_g, key)) {
+    return false;
   }
-
   page_id_t cur_page_id{page_g.GetPageId()};
   page_g.Drop();
+  page_g_w = bpm_->WritePage(cur_page_id);
+  return GoSibUntilCoverWW(page_g_w, key);
+}
 
-  WritePageGuard page_g_w{bpm_->WritePage(cur_page_id)};
-  if (page_g_w.As<BPlusTreePage>()->IsLeafPage()) {  // leaf
-    while (!page_g_w.As<LeafPage>()->CoveredKey(key, comparator_)) {
-      auto page_data{page_g_w.As<LeafPage>()};
-      page_id_t next_page_id{page_data->GetNextPageId()};
-      if (next_page_id == INVALID_PAGE_ID) {
-        break;
-      }
-      page_g_w.Drop();
-      page_g_w = bpm_->WritePage(next_page_id);
-    }
-  } else {  // internal
-    while (!page_g_w.As<InternalPage>()->CoveredKey(key, comparator_)) {
-      auto page_data{page_g_w.As<InternalPage>()};
-      page_id_t next_page_id{page_data->GetNextPageId()};
-      if (next_page_id == INVALID_PAGE_ID) {
-        break;
-      }
-      page_g_w.Drop();
-      page_g_w = bpm_->WritePage(next_page_id);
-    }
+INDEX_TEMPLATE_ARGUMENTS
+auto BPLUSTREE_TYPE::GoSibUntilHeadRR(ReadPageGuard &page_g) -> bool {
+  auto page_header_data{page_g.As<BPlusTreePage>()};
+  while (!page_header_data->IsLevelHead() && page_header_data->GetNextPageId() != INVALID_PAGE_ID) {
+    page_id_t sib_id{page_header_data->GetNextPageId()};
+    page_g.Drop();
+    page_g = bpm_->ReadPage(sib_id);
+    page_header_data = page_g.As<BPlusTreePage>();
   }
+  return page_header_data->IsLevelHead() && page_header_data->GetBackfixStatus() == BackfixStatus::IS_LINKED;
+}
 
-  return page_g_w;
+INDEX_TEMPLATE_ARGUMENTS
+auto BPLUSTREE_TYPE::GoSibUntilHeadWW(WritePageGuard &page_g) -> bool {
+  auto page_header_data{page_g.As<BPlusTreePage>()};
+  while (!page_header_data->IsLevelHead() && page_header_data->GetNextPageId() != INVALID_PAGE_ID) {
+    page_id_t sib_id{page_header_data->GetNextPageId()};
+    page_g.Drop();
+    page_g = bpm_->WritePage(sib_id);
+    page_header_data = page_g.As<BPlusTreePage>();
+  }
+  return page_header_data->IsLevelHead() && page_header_data->GetBackfixStatus() == BackfixStatus::IS_LINKED;
 }
 
 /**
- * 存在缺陷.
- *
- * 被 backfix 的 Level, 不需要也不应该再次 backfix,
- * 如果没有对称的 Merge, 其 backfix kv 不会消失.
- * 所以新的 backfix **必须** 发生在比上次 backfix 更高的 level.
- *
- * 以及, 每次 backfix 应该发生在对应 `backfix_page_id` 的直接 parent level.
- * 可问题在于, 如果这个直接 parent level 已经消失了呢?
- *
- * 可能需要修改机制, 比如在 Page 中标记是否已经完成了 backfix insert,
- * 或开启了 backfix erase.
- *
- * 对每个 node 都引入 NOT_LINKED_IN_PARENT, IS_LINKED_IN_PARENT, DONT_LINK_IN_PARENT 三种状态.
- * 每个新的节点初始化为 NOT_LINKED,
- * 若 Split 后因为需要 backfix insert, 则继续沿用 `backfix_path` 机制回溯.
- * 若某时刻发生 Merge, 若 NOT_LINKED 则 DONT_LINK 并结束. 否则只能回溯.
- * 在真正需要 insert backfix 的 Node, 再次检查, 若 DONT_LINK 则直接返回,
- * 否则 NOT_LINKED, 需要转变为 IS_LINKED.
- * 在真正需要 erase backfix 的 Node, 再次检查, 此时必定是 IS_LINKED, 执行删除.
- *
- * 若 `GetPathTo` 返回的 path level 和先前不一致,
- * 则必须检查对应 node 是否变为了 DONT_LINK.
- * 按照逻辑, 此时一定是 DONT_LINK.
- *
- * 这意味着, XorKv 机制必须被废除,
- * 因为其不能真正解决问题.
- *
- * 关于状态的修改, 必须发生在 Split/Merge 发生的同时.
- * 若 node 非 DONT_LINK, 则其没有发生 Merge, 其 parent level 存在对应 kv.
- * 此 kv 没有被删除, 如果在 Root 中, 则阻止了树高减小.
- * 这保证在 NOT_LINKED 时, backfix 一定能成功,
- * 若 parent level 消失, 则当前一定是 DONT_LINK.
+ * 需要能处理 `page_g` `IS_UNLINKED` 的情况.
+ * 最后 `page_g` 应该到达 `to_level` Level.
  */
 INDEX_TEMPLATE_ARGUMENTS
-void BPLUSTREE_TYPE::GetPathTo(int to_level, const KeyType &key, PathContainer &path) {
-  BUSTUB_ASSERT(to_level > 1, "Invalid args.");
+auto BPLUSTREE_TYPE::GoDownUntilLevel(ReadPageGuard &page_g, const KeyType &key, int to_level, PathContainer &path)
+    -> bool {
+  BUSTUB_ASSERT(to_level >= LEAF_LEVEL, "Invalid args.");
   BUSTUB_ASSERT(path.Empty(), "Invalid args.");
-  page_id_t cur_root_id{GetRootPageId()};
-  if (cur_root_id == INVALID_PAGE_ID) {
-    return;
+  if (!GoSibUntilCoverRR(page_g, key)) {
+    path.Clear();
+    return false;
   }
-  ReadPageGuard page_g{bpm_->ReadPage(cur_root_id)};
-  GoSibUntilCoverRR(page_g, key);
-  while (page_g.As<BPlusTreePage>()->GetLevel() >= to_level) {
-    BUSTUB_ASSERT(!page_g.As<BPlusTreePage>()->IsLeafPage(), "Unexpected.");
-    auto page_data{page_g.As<InternalPage>()};
+  auto page_header_data{page_g.As<BPlusTreePage>()};
+
+  if (page_header_data->GetLevel() < to_level) {
+    path.Clear();
+    return false;
+  }
+
+  while (page_header_data->GetLevel() > to_level) {
     path.EmplaceBack(page_g.GetPageId());
+    auto page_data{page_g.As<InternalPage>()};
     page_id_t next_id{page_data->Locate(key, comparator_)};
     page_g.Drop();
     page_g = bpm_->ReadPage(next_id);
-    GoSibUntilCoverRR(page_g, key);
+    if (!GoSibUntilCoverRR(page_g, key)) {
+      path.Clear();
+      return false;
+    }
+    page_header_data = page_g.As<BPlusTreePage>();
   }
+  BUSTUB_ASSERT(page_header_data->GetLevel() == to_level, "Unexpected.");
+  path.EmplaceBack(page_g.GetPageId());
+  return true;
 }
 
-/**
- * 需要处理需要 New Root 的情况.
- * 乐观策略, 先创建新 Node, 再判断 Root page id 是否未变.
- * 若未变, 正确更新 Root,
- * 否则把 backfix_kv 返回, 让上层重新遍历找到新的 Root.
- *
- * Update: 这应该拆分出另一个函数 `TryNewRoot`,
- * 只负责尝试新建 Root, 不负责任何 backfix.
- */
+INDEX_TEMPLATE_ARGUMENTS
+auto BPLUSTREE_TYPE::GoDownUntilLeafHead(ReadPageGuard &page_g) -> bool {
+  if (!GoSibUntilHeadRR(page_g)) {
+    return false;
+  }
+  auto page_header_data{page_g.As<BPlusTreePage>()};
+  BUSTUB_ASSERT(page_header_data->IsLevelHead(), "Unexpected.");
+  while (!page_header_data->IsLeafPage()) {
+    auto page_data{page_g.As<InternalPage>()};
+    page_id_t next_id{page_data->GetLowerlevelHeadId()};
+    page_g.Drop();
+    page_g = bpm_->ReadPage(next_id);
+    if (!GoSibUntilHeadRR(page_g)) {
+      return false;
+    }
+    BUSTUB_ASSERT(page_header_data->IsLevelHead(), "Unexpected.");
+    page_header_data = page_g.As<BPlusTreePage>();
+  }
+  BUSTUB_ASSERT(page_header_data->IsLeafPage(), "Unexpected.");
+  return true;
+}
+
+INDEX_TEMPLATE_ARGUMENTS
+auto BPLUSTREE_TYPE::TryGetPathTo(const KeyType &key, int to_level, PathContainer &path) -> bool {
+  page_id_t cur_root_id{GetRootPageId()};
+  if (cur_root_id == INVALID_PAGE_ID) {
+    path.Clear();
+    return false;
+  }
+  ReadPageGuard page_g{bpm_->ReadPage(cur_root_id)};
+  if (!GoDownUntilLevel(page_g, key, to_level, path)) {
+    path.Clear();
+    return false;
+  }
+  return true;
+}
+
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::TrySplitAndGo(WritePageGuard &page_g, const KeyType &key, IndexKvPack &backfix_kv) -> bool {
   auto page_header_data{page_g.As<BPlusTreePage>()};
+  auto page_status{page_header_data->GetBackfixStatus()};
+
+  BUSTUB_ASSERT(page_status == BackfixStatus::IS_LINKED || page_status == BackfixStatus::NEED_LINK, "Protocol error.");
+
   if (!page_header_data->IsOverflowed()) {
     backfix_kv = std::nullopt;
     return false;
@@ -684,6 +669,16 @@ auto BPLUSTREE_TYPE::TrySplitAndGo(WritePageGuard &page_g, const KeyType &key, I
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool {
   auto page_header_data{page_g.AsMut<BPlusTreePage>()};
+
+  /**
+   * 考虑在 Optimistically 到达 `page_g` 前, 有另一个线程先到达 `page_g` 并执行操作,
+   * `page_g` 可能是 `IS_UNLINKED`.
+   */
+
+  auto page_status{page_header_data->GetBackfixStatus()};
+
+  BUSTUB_ASSERT(page_status == BackfixStatus::IS_LINKED || page_status == BackfixStatus::NEED_LINK, "Protocol error.");
+
   if (!page_header_data->IsUnderflowed()) {
     backfix_kv = std::nullopt;
     return false;
@@ -741,6 +736,12 @@ auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_
       BUSTUB_ASSERT((sib_header_data->IsLeafPage() && sib_header_data->GetSize() == 0) ||
                         (!sib_header_data->IsLeafPage() && sib_header_data->GetSize() == 0),
                     "Unexpected.");
+      /**
+       * Sibling 从 Sibling Link 上删除才彻底从 Tree 上消失.
+       * 对于 `NEED_UNLINK`, 此处 `Retire`, 在对应线程 `BackfixRemoveKv` 流程结束后才会真正被删除.
+       * 对于 `IS_UNLINKED`, 此处可以直接删除.
+       */
+      qsbr_mgr_.Retire(sib_g_w.GetPageId());
       page_header_data->SetNextPageId(sib_header_data->GetNextPageId());
       backfix_kv = std::nullopt;
       break;
@@ -755,57 +756,39 @@ auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_
 
       BUSTUB_ASSERT(page_header_data->GetBackfixStatus() == BackfixStatus::IS_LINKED, "Protocol error.");
 
-      // 如果 page_data 是原有的 Root, 其 BackfixStatus 怎么更新?
-      // 向右合并会变更 Level Head. Tree Header 中的 Root Id 需要被正确更新.
-
-      // if (page_header_data->IsLeafPage()) {
-      //   auto page_data{page_g.AsMut<LeafPage>()};
-      //   // auto sib_data{sib_g_w.AsMut<LeafPage>()};  // NOLINT
-      //   page_data->MergeToRight(sib_g_w);
-      //   backfix_kv = {KeyType{}, page_g.GetPageId(), true, sib_g_w.GetPageId()};
-      // } else {
-      //   auto page_data{page_g.AsMut<InternalPage>()};
-      //   auto sib_data{sib_g_w.AsMut<InternalPage>()};  // NOLINT
-      //   page_data->MergeToRight(sib_g_w);
-      //   if (sib_data->GetLowerlevelHeadId() == INVALID_PAGE_ID) {
-      //     sib_data->SetLowerlevelHeadId(page_data->GetLowerlevelHeadId());
-      //   } else {
-      //     BUSTUB_ASSERT(false, "This is deprecated and unexpected.");
-      //     page_id_t old_lowerlevel_head_id{page_data->GetLowerlevelHeadId()};
-      //     qsbr_mgr_.Retire(std::move(old_lowerlevel_head_id));  // NOLINT
-      //   }
-      //   sib_data->ModifyKvAt(0, KeyType{}, sib_data->GetLowerlevelHeadId());
-      //   backfix_kv = {KeyType{}, page_g.GetPageId(), true, sib_g_w.GetPageId()};
-      // }
-
       if (page_header_data->IsLeafPage()) {
         auto page_data{page_g.AsMut<LeafPage>()};
+        auto sib_data{sib_g_w.AsMut<LeafPage>()};
         page_data->MergeToRight(sib_g_w);
-        backfix_kv = {page_data->GetLowKey(), page_g.GetPageId(), true, sib_g_w.GetPageId()};
+        /**
+         * 逻辑上, placeholder `key` 没有删除.
+         */
+        backfix_kv = {sib_data->GetLowKey(), page_g.GetPageId(), true, sib_g_w.GetPageId()};
       } else {
         auto page_data{page_g.AsMut<InternalPage>()};
         auto sib_data{sib_g_w.AsMut<InternalPage>()};
-        // page_date->MergeToRight(sib_g_w);
 
-        if (page_data->GetLowerlevelHeadId() != INVALID_PAGE_ID) {
-          page_id_t old_lowerlevel_head_id{page_data->GetLowerlevelHeadId()};
-          {
-            ReadPageGuard check_page_g{bpm_->ReadPage(old_lowerlevel_head_id)};
-            auto check_page_header_data{check_page_g.As<BPlusTreePage>()};
-            /**
-             * 检查 `old_lowerlevel_head_id` node 是否过时.
-             * 若过时, `DeleteKvAt`,
-             * 否则并入 Sibling.
-             */
-            if (check_page_header_data->IsLevelHead()) {
-            }
-          }
+        page_id_t old_lowerlevel_head_id{page_data->GetLowerlevelHeadId()};
+        BUSTUB_ASSERT(old_lowerlevel_head_id != INVALID_PAGE_ID, "Unexpected.");
+        BUSTUB_ASSERT(page_data->GetSize() > 0, "Unexpected.");
+        if (sib_data->GetLowerlevelHeadId() == INVALID_PAGE_ID) {
+          sib_data->SetLowerlevelHeadId(old_lowerlevel_head_id);
+        } else {
+          qsbr_mgr_.Retire(std::move(old_lowerlevel_head_id));  // NOLINT
+          page_data->ModifyKvAt(0, KeyType{}, sib_data->GetLowerlevelHeadId());
         }
+        page_data->MergeToRight(sib_g_w);
+
+        backfix_kv = {sib_data->GetLowKey(), page_g.GetPageId(), true, sib_g_w.GetPageId()};
       }
 
       page_header_data->SetIsLevelHead(false);
       sib_header_data->SetIsLevelHead(true);
       page_header_data->SetBackfixStatus(BackfixStatus::NEED_UNLINK);
+
+      BUSTUB_ASSERT(
+          !page_header_data->IsLevelHead() && page_header_data->GetBackfixStatus() == BackfixStatus::NEED_UNLINK,
+          "Unexpected.");
       page_g = std::move(sib_g_w);
       break;
 
@@ -878,7 +861,6 @@ auto BPLUSTREE_TYPE::TryExpandLevel(page_id_t &new_root_id) -> bool {
         desired_root_data->SetLowerlevelHeadId(expected_root_g.GetPageId());
         desired_root_data->NewKvAt(0);
         desired_root_data->ModifyKvAt(0, KeyType{}, expected_root_g.GetPageId());
-        // desired_root_data->ModifyKvAt(0, KeyType{}, expected_root_g.GetPageId());
         tree_header_data->root_page_id_ = desired_root_id;
       }
     }
@@ -928,7 +910,7 @@ auto BPLUSTREE_TYPE::TryShrinkLevel(page_id_t &new_root_id) -> bool {
       } else {
         auto expected_root_data{expected_root_g.As<InternalPage>()};
         /**
-         * 使用 `ValueAt(0)` 会出错.
+         * 使用 `GetLowerlevelHeadId()`.
          */
         tree_header_data->root_page_id_ = expected_root_data->GetLowerlevelHeadId();
         new_root_id = expected_root_data->GetLowerlevelHeadId();
@@ -946,15 +928,17 @@ auto BPLUSTREE_TYPE::TryShrinkLevel(page_id_t &new_root_id) -> bool {
 
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::BackfixInsertKv(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool {
-  auto &[backfix_key, backfix_val, m1, m2]{backfix_kv.value()};
+  auto &[backfix_key, backfix_val, ign1, ign2]{backfix_kv.value()};
   BUSTUB_ASSERT(!page_g.As<BPlusTreePage>()->IsLeafPage(), "Invalid args.");
+  auto page_data{page_g.AsMut<InternalPage>()};
+  BUSTUB_ASSERT(page_data->CoveredKey(backfix_key, comparator_), "Unexpected.");
 
   IndexKvPack new_backfix_kv{std::nullopt};
-  GoSibUntilCoverWW(page_g, backfix_key);
+
   // 注意此处顺序. 此位置, backfix_kv 是将要被插入到当前节点的 kv.
   // 此处的 TrySplit 不应该覆盖 backfix_kv 否则出错.
   bool ret{TrySplitAndGo(page_g, backfix_key, new_backfix_kv)};
-  auto page_data{page_g.AsMut<InternalPage>()};
+  page_data = page_g.AsMut<InternalPage>();
   {
     WritePageGuard check_page_g{bpm_->WritePage(backfix_val)};
     auto check_page_header_data{check_page_g.AsMut<BPlusTreePage>()};
@@ -974,47 +958,98 @@ auto BPLUSTREE_TYPE::BackfixInsertKv(WritePageGuard &page_g, IndexKvPack &backfi
   return ret;
 }
 
-/**
- * 存在缺陷.
- * 不允许这样交错 hack `backfix_kv`, 必须原生支持相关操作.
- * 先 `DeleteKvAt` 原来的 kv, 再设置新的 Level Head.
- * 最后 `TryMergeAndGo`, 此时 Level Head `GetSize() == 0`,
- * 并设置新的 Level Head.
- */
 INDEX_TEMPLATE_ARGUMENTS
 auto BPLUSTREE_TYPE::BackfixRemoveKv(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool {
   auto &[backfix_key, backfix_val, update_lowerlevel_head, new_lowerlevel_head_id]{backfix_kv.value()};
   BUSTUB_ASSERT(!page_g.As<BPlusTreePage>()->IsLeafPage(), "Invalid args.");
+  BUSTUB_ASSERT(update_lowerlevel_head, "Only support this operation.");
 
-  GoSibUntilCoverWW(page_g, backfix_key);
+  auto page_header_data{page_g.As<BPlusTreePage>()};
   auto page_data{page_g.AsMut<InternalPage>()};
+
+  BUSTUB_ASSERT(page_data->CoveredKey(backfix_key, comparator_), "Unexpected.");
+  /**
+   * 不进行常规的 `DeleteKv`, 而是覆盖 `kv[0]`.
+   * 本质上是因为 Level Head 的 `lowkey_` 大小无意义, 不能进行常规查找删除.
+   *
+   * > 或者说, Level Head 逻辑上, 从来没有被删除, 其和其 parent 中的 Kv 只是在向右转移.
+   */
+
+  IndexKvPack new_backfix_kv{std::nullopt};
+  TryMergeAndGo(page_g, new_backfix_kv);
+  page_header_data = page_g.AsMut<BPlusTreePage>();
+  page_data = page_g.AsMut<InternalPage>();
 
   int lowerbound_idx{page_data->FindIndexLowerbound(backfix_key, comparator_)};
   int upperbound_idx{page_data->FindIndexUpperbound(backfix_key, comparator_)};
   if (upperbound_idx - lowerbound_idx > 1) {
     for (; lowerbound_idx < upperbound_idx; lowerbound_idx++) {
-      if (page_data->ValueAt(lowerbound_idx) == backfix_val) {
+      if (page_data->ValueAt(lowerbound_idx) == new_lowerlevel_head_id) {
         break;
       }
     }
   }
-  // 找不到应该尝试向 Sibling 走.
-  while (lowerbound_idx == page_data->GetSize() && page_data->GetNextPageId() != INVALID_PAGE_ID) {
-    page_id_t sib_id{page_data->GetNextPageId()};
+  while (lowerbound_idx == upperbound_idx) {
+    page_id_t sib_id{page_header_data->GetNextPageId()};
     page_g.Drop();
     page_g = bpm_->WritePage(sib_id);
-    GoSibUntilCoverWW(page_g, backfix_key);
+    if (!GoSibUntilCoverWW(page_g, backfix_key)) {
+      BUSTUB_ASSERT(false, "Unexpected.");
+    }
+    page_header_data = page_g.AsMut<BPlusTreePage>();
     page_data = page_g.AsMut<InternalPage>();
     lowerbound_idx = page_data->FindIndexLowerbound(backfix_key, comparator_);
     upperbound_idx = page_data->FindIndexUpperbound(backfix_key, comparator_);
     if (upperbound_idx - lowerbound_idx > 1) {
       for (; lowerbound_idx < upperbound_idx; lowerbound_idx++) {
-        if (page_data->ValueAt(lowerbound_idx) == backfix_val) {
+        if (page_data->ValueAt(lowerbound_idx) == new_lowerlevel_head_id) {
           break;
         }
       }
     }
   }
+
+  BUSTUB_ASSERT(comparator_(page_data->KeyAt(lowerbound_idx), backfix_key) == 0, "Unexpected.");
+  BUSTUB_ASSERT(page_data->ValueAt(lowerbound_idx) == new_lowerlevel_head_id, "Unexpected.");
+
+  page_data->DeleteKvAt(lowerbound_idx);
+
+  {
+    WritePageGuard check_page_g{bpm_->WritePage(new_lowerlevel_head_id)};
+    auto check_page_header_data{check_page_g.AsMut<BPlusTreePage>()};
+    if (check_page_header_data->IsLevelHead()) {
+      page_id_t old_lowerlevel_head_id{page_data->GetLowerlevelHeadId()};
+      /**
+       * 允许 `page_g` 不是 Level Head,
+       * 这通常发生在 node1 MergeToRight node2 且 node1, node2 不属于同一个 parent 时,
+       * node2 parent 尚未成为 Level Head.
+       */
+      BUSTUB_ASSERT(!page_data->IsLevelHead() || old_lowerlevel_head_id != INVALID_PAGE_ID, "Unexpected.");
+      if (old_lowerlevel_head_id != INVALID_PAGE_ID) {
+        {
+          WritePageGuard unlink_page_g{bpm_->WritePage(old_lowerlevel_head_id)};
+          auto unlink_page_header_data{unlink_page_g.AsMut<BPlusTreePage>()};
+          BUSTUB_ASSERT(unlink_page_header_data->GetBackfixStatus() == BackfixStatus::NEED_UNLINK, "Protocol error.");
+          unlink_page_header_data->SetBackfixStatus(BackfixStatus::IS_UNLINKED);
+        }
+        /**
+         * 不要 Retire.
+         * 所有节点被 parent 通过 Kv, 或者 leaf sibling 通过 Sibling Link 连接,
+         * 其中 Sibling Link 是最晚断开的, 在将节点从 Sibling Link 中删除时进行 Retire.
+         */
+      }
+      page_data->SetLowerlevelHeadId(new_lowerlevel_head_id);
+      if (page_data->IsLevelHead()) {
+        page_data->ModifyKvAt(0, KeyType{}, new_lowerlevel_head_id);
+      }
+    } else {
+      BUSTUB_ASSERT(check_page_header_data->GetBackfixStatus() == BackfixStatus::NEED_UNLINK, "Protocol error.");
+      check_page_header_data->SetBackfixStatus(BackfixStatus::IS_UNLINKED);
+    }
+  }
+
+  backfix_kv = std::move(new_backfix_kv);
+  return true;
 
   /**
    * 如果 `backfix_key_opt` 是 `std::nullopt`,
@@ -1034,54 +1069,7 @@ auto BPLUSTREE_TYPE::BackfixRemoveKv(WritePageGuard &page_g, IndexKvPack &backfi
    * 必须检查 node1 持有的 `lowerlevel_head_id_` node 是否仍是有效的 Level Head.
    * 若是, 则修改 node2 parent 的 `val[0]` 和 `lowerlevel_head_id_`.
    * 否则 no-op.
-   *
-   * > 若 node1 parent 为空, 则其 `lowerlevel_head_id_` 应该无效.
-   * > 否则应该为有效 id, 但此 id 对应 node 可能已经过时.
    */
-
-  /**
-   * 应该简化实现, 给 `TryNewRoot` 添加 `with_key` `with_value` 参数,
-   * 用于创造第一个 node, 其有有效的 `lowkey_`.
-   */
-
-  BUSTUB_ASSERT(lowerbound_idx != page_data->GetSize(), "Unexpected.");
-  BUSTUB_ASSERT(comparator_(page_data->KeyAt(lowerbound_idx), backfix_key) == 0, "Unexpected.");
-
-  {
-    WritePageGuard check_page_g{bpm_->WritePage(backfix_val)};
-    auto check_page_header_data{check_page_g.AsMut<BPlusTreePage>()};
-    BUSTUB_ASSERT(check_page_header_data->GetBackfixStatus() == BackfixStatus::NEED_UNLINK, "Protocol error.");
-    check_page_header_data->SetBackfixStatus(BackfixStatus::IS_UNLINKED);
-  }
-
-  page_id_t unlink_id{page_data->ValueAt(lowerbound_idx)};
-  BUSTUB_ASSERT(unlink_id == backfix_val, "Unexepcted.");
-  qsbr_mgr_.Retire(std::move(unlink_id));  // NOLINT
-
-  if (update_lowerlevel_head) {
-    /**
-     * 不进行常规的 `DeleteKv`, 而是覆盖 `kv[0]`.
-     * 本质上是因为 Level Head 的 `lowkey_` 大小无意义, 不能进行常规查找删除.
-     */
-    {
-      ReadPageGuard check_page_g{bpm_->ReadPage(new_lowerlevel_head_id)};
-      auto check_page_header_data{check_page_g.As<BPlusTreePage>()};
-      if (check_page_header_data->IsLevelHead()) {
-        page_data->SetLowerlevelHeadId(new_lowerlevel_head_id);
-        /**
-         * 这里可以直接覆盖 `key[0]`.
-         */
-        // page_data->DeleteKvAt();
-        // todo.
-        page_data->ModifyKvAt(0, KeyType{}, new_lowerlevel_head_id);
-      }
-    }
-  } else {
-    page_data->DeleteKvAt(lowerbound_idx);
-  }
-
-  TryMergeAndGo(page_g, backfix_kv);
-  return true;
 }
 
 template class BPlusTree<GenericKey<4>, RID, GenericComparator<4>>;

@@ -258,7 +258,7 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::MergeFromRight(WritePageGuard &sib_g_w) {
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SplitToRight(WritePageGuard &sib_g_w) {
   auto sib_data{sib_g_w.AsMut<BPlusTreeInternalPage>()};
-  BUSTUB_ASSERT(GetSize() >= 3, "Unexpected.");
+  BUSTUB_ASSERT(GetSize() >= 2, "Unexpected.");
   BUSTUB_ASSERT(sib_data->GetSize() == 0, "Unexpected.");
 
   int kv_sum{GetSize() + sib_data->GetSize()};
