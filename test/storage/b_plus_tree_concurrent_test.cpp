@@ -345,6 +345,11 @@ void MixTest1Call() {
         for_delete.push_back(i);
       }
     }
+
+    // More random.
+    std::mt19937 gen{iter};
+    std::shuffle(for_delete.begin(), for_delete.end(), gen);
+
     // Insert all the keys to delete
     InsertHelper(&tree, for_delete);
 
@@ -407,6 +412,12 @@ void MixTest2Call() {
         dynamic_keys.push_back(i);
       }
     }
+
+    // More random.
+    std::mt19937 gen{iter};
+    std::shuffle(perserved_keys.begin(), perserved_keys.end(), gen);
+    std::shuffle(dynamic_keys.begin(), dynamic_keys.end(), gen);
+
     InsertHelper(&tree, perserved_keys);
 
     size_t size;
