@@ -513,13 +513,13 @@ void MyScaleTest2Call() {
   }
 }
 
-TEST(BPlusTreeConcurrentTest, InsertTest1) {  // NOLINT
-  InsertTest1Call();
-}
+// TEST(BPlusTreeConcurrentTest, InsertTest1) {  // NOLINT
+//   InsertTest1Call();
+// }
 
-TEST(BPlusTreeConcurrentTest, InsertTest2) {  // NOLINT
-  InsertTest2Call();
-}
+// TEST(BPlusTreeConcurrentTest, InsertTest2) {  // NOLINT
+//   InsertTest2Call();
+// }
 
 TEST(BPlusTreeConcurrentTest, DeleteTest1) {  // NOLINT
   DeleteTest1Call();

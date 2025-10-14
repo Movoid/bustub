@@ -754,6 +754,17 @@ auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_
         return false;
       }
 
+      /**
+       * 允许向右合并.
+       * 对于 Level Head, 将 Level Head 的资格转移给 Sibling, 并
+       * 在 Sibling 的 parent 中删除 `lowkey_` kv 并更新 `lowerlevel_head_id_`.
+       *
+       * 对于非 Level Head, 直接在 parent 中删除 kv.
+       * > 若在这种情况 `BackfixRemoveKv` 完成之前, parent 转变为 Level Head,
+       * > 应该不影响正确性, 因为此时 parent 的 `kv[0]` 来自先前的 Level Head,
+       * > 没有覆盖本该删除的 Kv.
+       */
+
       BUSTUB_ASSERT(page_header_data->GetBackfixStatus() == BackfixStatus::IS_LINKED, "Protocol error.");
 
       if (page_header_data->IsLeafPage()) {
@@ -976,7 +987,6 @@ auto BPLUSTREE_TYPE::BackfixRemoveKv(WritePageGuard &page_g, IndexKvPack &backfi
    */
 
   IndexKvPack new_backfix_kv{std::nullopt};
-  TryMergeAndGo(page_g, new_backfix_kv);
   page_header_data = page_g.AsMut<BPlusTreePage>();
   page_data = page_g.AsMut<InternalPage>();
 
@@ -1048,6 +1058,7 @@ auto BPLUSTREE_TYPE::BackfixRemoveKv(WritePageGuard &page_g, IndexKvPack &backfi
     }
   }
 
+  TryMergeAndGo(page_g, new_backfix_kv);
   backfix_kv = std::move(new_backfix_kv);
   return true;
 

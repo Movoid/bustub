@@ -164,10 +164,11 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::Locate(const KeyType &key, KeyComparator &c
   BUSTUB_ASSERT(!IsLevelHead() || GetLowerlevelHeadId() == ValueAt(0), "Unexpected.");
   BUSTUB_ASSERT(!(GetNextPageId() != INVALID_PAGE_ID) || cmp(key, GetHighKey()) <= 0, "Unexpected.");
 
-  int upperbound_idx{FindIndexUpperbound(key, cmp)};
+  int lowerbound_idx{FindIndexLowerbound(key, cmp)};
   /**
-   * 考虑当前要找的 `key` 正好存在于当前 Internal Node 中的某个 kv,
-   * 使用 lowerbound 将路由错误.
+   * 使用 lowerbound 路由, 必须 `-1`.
+   * 考虑部分等于 `key` 的 kv 存在于 `lowerbound_idx` 的前一个节点,
+   * 但此 kv 的 `lowkey_` 可能小于 `key`, 直接取 `lowerbound_idx` 将错过.
    */
   /**
    * 考虑 Level Head 向右 Merge 的情况.
@@ -176,7 +177,7 @@ auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::Locate(const KeyType &key, KeyComparator &c
    * 新 Level Head 的 kv 在其 parent 中是 `val[0]`,
    * 这需要我们访问还没有立刻转为 Level Head 的 parent 的 `lowerlevel_head_id_`.
    */
-  page_id_t lower_page_id{upperbound_idx == 0 ? GetLowerlevelHeadId() : ValueAt(upperbound_idx - 1)};
+  page_id_t lower_page_id{lowerbound_idx == 0 ? GetLowerlevelHeadId() : ValueAt(lowerbound_idx - 1)};
   return lower_page_id;
 }
 
@@ -218,7 +219,9 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::DeleteKvAt(int index) {
 INDEX_TEMPLATE_ARGUMENTS
 void B_PLUS_TREE_INTERNAL_PAGE_TYPE::MergeToRight(WritePageGuard &sib_g_w) {
   auto sib_data{sib_g_w.AsMut<BPlusTreeInternalPage>()};
-  BUSTUB_ASSERT(sib_data->GetSize() >= 1, "Unexpected.");
+  /**
+   * Sibling 可以是 `GetSize() == 0`.
+   */
   if (GetSize() > 0) {
     std::memmove(sib_data->key_array_ + GetSize(), sib_data->key_array_, sizeof(KeyType) * sib_data->GetSize());
     std::memmove(sib_data->page_id_array_ + GetSize(), sib_data->page_id_array_,

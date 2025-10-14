@@ -115,15 +115,21 @@ void BPlusTreePage::SetLowerlevelHeadId(page_id_t standby_id) {
 }
 
 /**
- * Internal Node 至少要有 2 Kv. 且不能完全满.
+ * Level Head Internal Node 允许全满, 其他 Internal Node 不允许.
+ * Level Head Internal Node 至少有 2 Kv.
+ *
  * 否则考虑 Level Head Internal Node 有 1 Kv, 其 Sibling 满,
  * Level Head 永远无法触发 `MergeToRight`.
+ *
+ * 对于非 Level Head 的 Internal Node 施加更严格的 Overflow 限制.
  */
-auto BPlusTreePage::IsOverflowed() const -> bool { return GetSize() >= GetMaxSize() - static_cast<int>(!IsLeafPage()); }
+auto BPlusTreePage::IsOverflowed() const -> bool {
+  return GetSize() >= GetMaxSize() - static_cast<int>(!IsLeafPage() && !IsLevelHead());
+}
 
 auto BPlusTreePage::IsOverflowedAfterMergeWith(WritePageGuard &rpage_g) const -> bool {
   int cnt_sum{GetSize() + rpage_g.As<BPlusTreePage>()->GetSize()};
-  return cnt_sum > GetMaxSize();
+  return cnt_sum > GetMaxSize() - static_cast<int>(!IsLeafPage() && !IsLevelHead());
 }
 
 auto BPlusTreePage::IsUnderflowed() const -> bool { return GetSize() <= GetMinSize(); }
