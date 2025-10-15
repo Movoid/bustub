@@ -29,13 +29,31 @@ auto BPlusTreePage::GetSize() const -> int {
   BUSTUB_ASSERT(size_ <= GetMaxSize(), "Unexpected.");
   return size_;
 }
+
+auto BPlusTreePage::GetInvalidSize() const -> int {
+  BUSTUB_ASSERT(invalid_size_ <= GetSize(), "Unexpected.");
+  return invalid_size_;
+}
+
 void BPlusTreePage::SetSize(int size) {
   size_ = size;
   BUSTUB_ASSERT(size_ <= GetMaxSize(), "Unexpected.");
 }
+
+void BPlusTreePage::SetInvalidSize(int invalid_size) {
+  invalid_size_ = invalid_size;
+  BUSTUB_ASSERT(invalid_size <= GetSize(), "Unexpected.");
+}
+
 void BPlusTreePage::ChangeSizeBy(int amount) {
   size_ += amount;
   BUSTUB_ASSERT(size_ <= GetMaxSize(), "Unexpected.");
+}
+
+auto BPlusTreePage::GetValidSize() const -> int {
+  int valid_size{GetSize() - GetInvalidSize()};
+  BUSTUB_ASSERT(0 <= valid_size && valid_size <= GetMaxSize(), "Unexpected.");
+  return valid_size;
 }
 
 /*
@@ -128,11 +146,12 @@ auto BPlusTreePage::IsOverflowed() const -> bool {
 }
 
 auto BPlusTreePage::IsOverflowedAfterMergeWith(WritePageGuard &rpage_g) const -> bool {
-  int cnt_sum{GetSize() + rpage_g.As<BPlusTreePage>()->GetSize()};
+  auto rpage_data{rpage_g.As<BPlusTreePage>()};
+  int cnt_sum{GetSize() - GetInvalidSize() + rpage_data->GetSize() - rpage_data->GetInvalidSize()};
   return cnt_sum > GetMaxSize() - static_cast<int>(!IsLeafPage() && !IsLevelHead());
 }
 
-auto BPlusTreePage::IsUnderflowed() const -> bool { return GetSize() <= GetMinSize(); }
+auto BPlusTreePage::IsUnderflowed() const -> bool { return GetSize() - GetInvalidSize() <= GetMinSize(); }
 
 /**
 关于 min_size_ 的计算草稿.

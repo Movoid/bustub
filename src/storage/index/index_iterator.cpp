@@ -34,6 +34,7 @@ auto INDEXITERATOR_TYPE::operator*() -> std::pair<const KeyType &, const ValueTy
   // UNIMPLEMENTED("TODO(P2): Add implementation.");
   BUSTUB_ASSERT(!IsEnd(), "Invalid instance.");
   auto page_data{page_g_opt_.value().As<LeafPage>()};
+  BUSTUB_ASSERT(page_data->ValueAt(offset_).GetPageId() != INVALID_PAGE_ID, "Unexpected.");
   return {page_data->KeyAt(offset_), page_data->ValueAt(offset_)};
 }
 
@@ -45,12 +46,20 @@ auto INDEXITERATOR_TYPE::operator++() -> INDEXITERATOR_TYPE & {
   offset_++;
 
   auto page_data{page_g_opt_.value().As<LeafPage>()};
-  while (offset_ == page_data->GetSize() && page_data->GetNextPageId() != INVALID_PAGE_ID) {
-    page_id_t sib_id{page_data->GetNextPageId()};
-    page_g_opt_.value().Drop();
-    page_g_opt_ = bpm_->ReadPage(sib_id);
-    page_data = page_g_opt_.value().As<LeafPage>();
-    offset_ = 0;
+
+  while (true) {
+    while (offset_ < page_data->GetSize() && page_data->ValueAt(offset_) == RID{INVALID_PAGE_ID, 0}) {
+      offset_++;
+    }
+    if (offset_ == page_data->GetSize() && page_data->GetNextPageId() != INVALID_PAGE_ID) {
+      page_id_t sib_id{page_data->GetNextPageId()};
+      page_g_opt_.value().Drop();
+      page_g_opt_ = bpm_->ReadPage(sib_id);
+      page_data = page_g_opt_.value().As<LeafPage>();
+      offset_ = 0;
+      continue;
+    }
+    break;
   }
 
   if (offset_ == page_data->GetSize()) {

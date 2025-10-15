@@ -82,8 +82,14 @@ class BPlusTreePage {
   void SetPageType(IndexPageType page_type);
 
   auto GetSize() const -> int;
+  auto GetInvalidSize() const -> int;
+
   void SetSize(int size);
+  void SetInvalidSize(int valid_size);
+
   void ChangeSizeBy(int amount);
+
+  auto GetValidSize() const -> int;
 
   auto GetMaxSize() const -> int;
   void SetMaxSize(int max_size);
@@ -129,7 +135,8 @@ class BPlusTreePage {
    * Number of key & value pairs in a page
    * 无论什么类型节点, 都指示当前已有的 key 数量.
    */
-  int size_{};
+  int size_{};  // `invalid_size_ + tomb_size_`
+  int invalid_size_{};
   /**
    * Max number of key & value pairs in a page
    * 无论什么类型节点, 都指示最大的 key 数量.

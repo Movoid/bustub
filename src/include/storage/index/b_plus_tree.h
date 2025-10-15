@@ -501,7 +501,7 @@ class QSBRGuard {
   ~QSBRGuard() {
     if (mgr_) {
       mgr_->ExitCriticalZone();
-      if (mgr_->GetRetiredCntLocal() > 0) {
+      if (mgr_->GetRetiredCntLocal() > 32) {
         mgr_->ReclaimLocal();
       }
     }
@@ -1296,6 +1296,8 @@ class BPlusTree {
   [[nodiscard]] auto GoDownUntilLeafHead(ReadPageGuard &page_g) -> bool;
 
   [[nodiscard]] auto TryGetPathTo(const KeyType &key, int to_level, PathContainer &path) -> bool;
+
+  void CleanTombstone(WritePageGuard &page_g);
 
   auto TrySplitAndGo(WritePageGuard &page_g, const KeyType &key, IndexKvPack &backfix_kv) -> bool;
   auto TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_kv) -> bool;
