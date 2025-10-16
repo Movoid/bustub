@@ -12,8 +12,12 @@
 
 #pragma once
 
-#include <list>
+#include <atomic>
+#include <chrono>
+#include <cstring>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <shared_mutex>
 #include <thread>
 #include <unordered_map>
@@ -87,15 +91,6 @@ class FrameHeader {
    */
   std::shared_mutex rwlatch_;
 
-  /** @brief The number of pins on this frame keeping the page in memory.
-   *
-   * 注意, `pin_count_` 必须和 replacer_ `SetEvictable` 完全同步,
-   * 且必须用 `bpm_latch_` 保护原子操作,
-   * 用 frame `rwlatch_` 会导致需要检查 `pin_count_` 时重复上锁死锁.
-   */
-  // std::atomic<size_t> pin_count_;
-  size_t pin_count_{};
-
   /** @brief The dirty flag.
    *
    * dirty 标记, 写 frame 后需要标记, 在 frame evict 后需要 flush.
@@ -125,6 +120,14 @@ class FrameHeader {
    * 只有 `page_table_` 能通过 page id 0 映射到此 frame 才说明有效.
    */
   page_id_t page_id_{INVALID_PAGE_ID};
+
+  /** @brief The number of pins on this frame keeping the page in memory.
+   *
+   * 注意, `pin_count_` 必须和 replacer_ `SetEvictable` 完全同步,
+   * 且必须用 `bpm_latch_` 保护原子操作,
+   * 用 frame `rwlatch_` 会导致需要检查 `pin_count_` 时重复上锁死锁.
+   */
+  alignas(simple_cu::utils::CACHELINE_SIZE) size_t pin_count_{};
 };
 
 /**
@@ -170,11 +173,11 @@ class BufferPoolManager {
   void SetCallbackOnDestroyUnsafe(const std::function<void()> &func);
 
  private:
-  auto FetchPageUnsafe(page_id_t page_id, frame_id_t frame_id) -> bool;
-  auto FlushPageUnsafe(page_id_t page_id, frame_id_t frame_id) -> bool;
+  void FetchPageUnsafe(page_id_t page_id, char *dst);
+  void FlushPageUnsafe(page_id_t page_id, char *src);
 
-  auto FetchPageAsyncUnsafe(page_id_t page_id, frame_id_t frame_id) -> std::future<bool>;
-  auto FlushPageAsyncUnsafe(page_id_t page_id, frame_id_t frame_id) -> std::future<bool>;
+  void FetchPageAsyncUnsafe(page_id_t page_id, char *dst);
+  void FlushPageAsyncUnsafe(page_id_t page_id, char *src);
 
   auto TryAllocateFrameUnsafe(frame_id_t &frame_id) -> bool;
   auto TryCommitFrameUnsafe(frame_id_t &expected_frame_id, frame_id_t desired_frame_id, page_id_t page_id) -> bool;
@@ -265,10 +268,5 @@ class BufferPoolManager {
    * stored inside of it. Additionally, you may also want to implement a helper function that returns either a shared
    * pointer to a `FrameHeader` that already has a page's data stored inside of it, or an index to said `FrameHeader`.
    */
-
-  /**
-   * Callback functions on destroy.
-   */
-  std::vector<std::function<void()>> callback_;
 };
 }  // namespace bustub

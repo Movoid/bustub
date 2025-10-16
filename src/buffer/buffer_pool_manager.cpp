@@ -103,12 +103,7 @@ BufferPoolManager::BufferPoolManager(size_t num_frames, DiskManager *disk_manage
  *
  * Support callback.
  */
-BufferPoolManager::~BufferPoolManager() {
-  while (!callback_.empty()) {
-    callback_.back()();
-    callback_.pop_back();
-  }
-}
+BufferPoolManager::~BufferPoolManager() = default;
 
 /**
  * @brief Returns the number of frames that this buffer pool manages.
@@ -120,14 +115,12 @@ auto BufferPoolManager::Size() const -> size_t { return num_frames_; }
  *
  * 读 disk.
  */
-auto BufferPoolManager::FetchPageUnsafe(page_id_t page_id, frame_id_t frame_id) -> bool {
-  FrameHeader &frame{*frames_[frame_id]};
-  auto p{disk_scheduler_->CreatePromise()};
-  std::future<bool> fut{p.get_future()};
-  DiskRequest req{false, frame.GetDataMut(), page_id, std::move(p)};
-  disk_scheduler_->Schedule(std::move(req));
+void BufferPoolManager::FetchPageUnsafe(page_id_t page_id, char *dst) {
+  auto promise{disk_scheduler_->CreatePromise()};
+  std::future<bool> fut{promise.get_future()};
+  DiskRequest request{false, dst, page_id, std::move(promise), false};
+  [[maybe_unused]] bool is_async{disk_scheduler_->Schedule(std::move(request))};
   fut.get();
-  return true;
 }
 
 /**
@@ -135,37 +128,36 @@ auto BufferPoolManager::FetchPageUnsafe(page_id_t page_id, frame_id_t frame_id) 
  *
  * 写 disk.
  */
-auto BufferPoolManager::FlushPageUnsafe(page_id_t page_id, frame_id_t frame_id) -> bool {
-  FrameHeader &frame{*frames_[frame_id]};
-  auto p{disk_scheduler_->CreatePromise()};
-  std::future<bool> fut{p.get_future()};
-  DiskRequest req{true, frame.GetDataMut(), page_id, std::move(p)};
-  disk_scheduler_->Schedule(std::move(req));
+void BufferPoolManager::FlushPageUnsafe(page_id_t page_id, char *src) {
+  auto promise{disk_scheduler_->CreatePromise()};
+  std::future<bool> fut{promise.get_future()};
+  DiskRequest request{true, src, page_id, std::move(promise), false};
+  [[maybe_unused]] bool is_async{disk_scheduler_->Schedule(std::move(request))};
   fut.get();
-  frame.is_dirty_ = false;
-  return true;
 }
 
-auto BufferPoolManager::FetchPageAsyncUnsafe(page_id_t page_id, frame_id_t frame_id) -> std::future<bool> {
-  FrameHeader &frame{*frames_[frame_id]};
-  auto p{disk_scheduler_->CreatePromise()};
-  std::future<bool> fut{p.get_future()};
-  DiskRequest req{false, frame.GetDataMut(), page_id, std::move(p)};
-  disk_scheduler_->Schedule(std::move(req));
-  return fut;
+void BufferPoolManager::FetchPageAsyncUnsafe(page_id_t page_id, char *dst) {
+  auto promise{disk_scheduler_->CreatePromise()};
+  std::future<bool> fut{promise.get_future()};
+  DiskRequest request{false, dst, page_id, std::move(promise), true};
+  bool is_async{disk_scheduler_->Schedule(std::move(request))};
+  if (!is_async) {
+    fut.get();
+  }
 }
 
 /**
  * `Schedule` 会对 frame data 做一份拷贝, 以实现 async.
  * 不会修改原本 frame data.
  */
-auto BufferPoolManager::FlushPageAsyncUnsafe(page_id_t page_id, frame_id_t frame_id) -> std::future<bool> {
-  FrameHeader &frame{*frames_[frame_id]};
-  auto p{disk_scheduler_->CreatePromise()};
-  std::future<bool> fut{p.get_future()};
-  DiskRequest req{true, frame.GetDataMut(), page_id, std::move(p)};
-  disk_scheduler_->Schedule(std::move(req));
-  return fut;
+void BufferPoolManager::FlushPageAsyncUnsafe(page_id_t page_id, char *src) {
+  auto promise{disk_scheduler_->CreatePromise()};
+  std::future<bool> fut{promise.get_future()};
+  DiskRequest request{true, src, page_id, std::move(promise), true};
+  bool is_async{disk_scheduler_->Schedule(std::move(request))};
+  if (!is_async) {
+    fut.get();
+  }
 }
 
 /**
@@ -199,7 +191,8 @@ auto BufferPoolManager::TryAllocateFrameUnsafe(frame_id_t &frame_id) -> bool {
    * 此处需要改进. Flush 应该在持有 frame lk 时执行.
    */
   if (frame.is_dirty_) {
-    FlushPageAsyncUnsafe(frame.page_id_, frame_id);
+    FlushPageAsyncUnsafe(frame.page_id_, frame.GetDataMut());
+    frame.is_dirty_ = false;
   }
 
   page_table_.erase(frame.page_id_);
@@ -252,9 +245,8 @@ auto BufferPoolManager::NewPage() -> page_id_t {
    */
   page_id_t new_page_id{next_page_id_.fetch_add(1, std::memory_order_relaxed)};
 
-  auto p{disk_scheduler_->CreatePromise()};
-  DiskRequest req{true, nullptr, new_page_id, std::move(p), std::nullopt};
-  disk_scheduler_->Schedule(std::move(req));
+  char test_buf[BUSTUB_PAGE_SIZE]{};
+  FlushPageAsyncUnsafe(new_page_id, test_buf);
 
   return new_page_id;
 }
@@ -398,8 +390,8 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
         /**
          * Committed & Pinned. 开始 IO.
          */
+        FetchPageUnsafe(page_id, frame.GetDataMut());
         frame.page_id_ = page_id;
-        FetchPageAsyncUnsafe(page_id, frame_id).get();
       }
     }
 
@@ -483,8 +475,8 @@ auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_typ
         /**
          * Committed & Pinned. 开始 IO.
          */
+        FetchPageUnsafe(page_id, frame.GetDataMut());
         frame.page_id_ = page_id;
-        FetchPageAsyncUnsafe(page_id, frame_id).get();
       }
     }
 
@@ -579,7 +571,7 @@ auto BufferPoolManager::FlushPage(page_id_t page_id) -> bool {
   // std::shared_lock<std::shared_mutex> frame_lk{frames_[frame_id]->rwlatch_};
   FrameHeader &frame{*frames_[frame_id]};
   if (frame.is_dirty_) {
-    FlushPageAsyncUnsafe(page_id, frame_id);
+    FlushPageAsyncUnsafe(page_id, frame.GetDataMut());
     frame.is_dirty_ = false;
   }
   {
@@ -609,7 +601,7 @@ void BufferPoolManager::FlushAllPages() {
       if (frame_ptr->page_id_ == INVALID_PAGE_ID || !frame_ptr->is_dirty_) {
         continue;
       }
-      FlushPageAsyncUnsafe(frame_ptr->page_id_, frame_ptr->frame_id_);
+      FlushPageAsyncUnsafe(frame_ptr->page_id_, frame_ptr->GetDataMut());
       frame_ptr->is_dirty_ = false;
     }
   }
@@ -650,7 +642,5 @@ auto BufferPoolManager::GetPinCount(page_id_t page_id) -> std::optional<size_t> 
     return frame.pin_count_;
   }
 }
-
-void BufferPoolManager::SetCallbackOnDestroyUnsafe(const std::function<void()> &func) { callback_.emplace_back(func); }
 
 }  // namespace bustub
