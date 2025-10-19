@@ -28,20 +28,15 @@ namespace bustub {
 // ConcurrentTempFrameBuffer
 //
 // ========================================
-ConcurrentTempFrameBuffer::ConcurrentTempFrameBuffer(size_t temp_frame_cnt) {
-  for (size_t i = 0; i < temp_frame_cnt; i++) {
-    available_frames_.Push(new (std::align_val_t{simple_cu::utils::CACHELINE_SIZE}) char[BUSTUB_PAGE_SIZE]);
+ConcurrentTempFrameBuffer::ConcurrentTempFrameBuffer(size_t base_frame_cnt) : base_frame_cnt_{base_frame_cnt} {
+  base_ = new (std::align_val_t{simple_cu::utils::CACHELINE_SIZE}) char[base_frame_cnt * BUSTUB_PAGE_SIZE];
+  for (size_t i = 0; i < base_frame_cnt; i++) {
+    available_frames_.Push(base_ + (i * BUSTUB_PAGE_SIZE));
   }
 }
 
 ConcurrentTempFrameBuffer::~ConcurrentTempFrameBuffer() {
-  std::queue<char *> tmp{};
-  available_frames_.PopAll(tmp);
-  while (!tmp.empty()) {
-    auto ptr{tmp.front()};
-    ::operator delete[](ptr, std::align_val_t{simple_cu::utils::CACHELINE_SIZE});
-    tmp.pop();
-  }
+  ::operator delete[](base_, std::align_val_t{simple_cu::utils::CACHELINE_SIZE});
 }
 
 auto ConcurrentTempFrameBuffer::Allocate() -> char * { return available_frames_.Pop(); }
@@ -49,6 +44,18 @@ auto ConcurrentTempFrameBuffer::Allocate() -> char * { return available_frames_.
 auto ConcurrentTempFrameBuffer::TryAllocate(char *&res) -> bool { return available_frames_.TryPop(res); }
 
 void ConcurrentTempFrameBuffer::Deallocate(char *ptr) { available_frames_.Push(ptr); }
+
+auto ConcurrentTempFrameBuffer::IsDeallocatable(const char *ptr) -> bool {
+  return base_ <= ptr && ptr < base_ + base_frame_cnt_ * BUSTUB_PAGE_SIZE;
+}
+
+auto ConcurrentTempFrameBuffer::TryDeallocate(char *ptr) -> bool {
+  if (!IsDeallocatable(ptr)) {
+    return false;
+  }
+  Deallocate(ptr);
+  return true;
+};
 
 // ========================================
 //
@@ -58,63 +65,149 @@ void ConcurrentTempFrameBuffer::Deallocate(char *ptr) { available_frames_.Push(p
 DiskScheduler::PageTaskBlock::PageTaskBlock(page_id_t page_id, WorkerTable::WorkerShard *to_worker_shard)
     : ptb_page_id_{page_id}, to_worker_shard_{to_worker_shard} {}
 
-void DiskScheduler::PageTaskBlock::SubmitFlushSrc(char *new_flush_src, bool is_deallocatable,
-                                                  DiskSchedulerPromise &&callback) {
-  char *old_temp_frame{};
-  bool need_deallcate{};
-  {
-    std::lock_guard lk{m_};
-    BUSTUB_ASSERT(flush_src_ == nullptr || flush_src_is_deallocable_, "Unexpected.");
-    old_temp_frame = std::exchange(flush_src_, new_flush_src);
-    need_deallcate = std::exchange(flush_src_is_deallocable_, is_deallocatable);
-    pending_flush_cb_.emplace_back(std::move(callback));
-    if (!is_inqueue_) {
-      to_worker_shard_->pending_queue_.Push(this);
-      is_inqueue_ = true;
+void DiskScheduler::PageTaskBlock::SubmitFlushTask(char *new_flush_src, bool is_deallocable,
+                                                   DiskSchedulerPromise &&callback) {
+  auto old_state{state_.load(std::memory_order_acquire)};
+
+  pending_flush_cb_.emplace(Callback{std::move(callback), new_flush_src});
+  auto old_flush_src{flush_src_.exchange(new_flush_src, std::memory_order_release)};
+
+  while (true) {
+    auto new_state{old_state | State::PENDING_FLUSH | State::IS_INQUEUE};
+    if (state_.compare_exchange_weak(old_state, new_state, std::memory_order_release, std::memory_order_relaxed)) {
+      if ((old_state & State::IS_INQUEUE) == 0) {
+        to_worker_shard_->pending_queue_.Push(this);
+      }
+      break;
     }
   }
-  if (old_temp_frame != nullptr && need_deallcate) {
-    to_worker_shard_->temp_frame_buffer_.Deallocate(old_temp_frame);
-  }
+
+  to_worker_shard_->temp_frame_buffer_.TryDeallocate(old_flush_src);
 }
 
-void DiskScheduler::PageTaskBlock::SubmitFetchDst(char *new_fetch_dst, bool is_deallocatable,
-                                                  DiskSchedulerPromise &&callback) {
-  char *old_temp_frame{};
-  bool need_deallocate{};
-  {
-    std::lock_guard lk{m_};
-    BUSTUB_ASSERT(fetch_dst_ == nullptr || fetch_dst_is_deallocable_, "Unexpected.");
-    old_temp_frame = std::exchange(fetch_dst_, new_fetch_dst);
-    need_deallocate = std::exchange(fetch_dst_is_deallocable_, is_deallocatable);
-    pending_fetch_cb_.emplace_back(std::move(callback));
-    if (!is_inqueue_) {
-      to_worker_shard_->pending_queue_.Push(this);
-      is_inqueue_ = true;
+void DiskScheduler::PageTaskBlock::SubmitFetchTask(char *new_fetch_dst, bool is_deallocable,
+                                                   DiskSchedulerPromise &&callback) {
+  auto old_state{state_.load(std::memory_order_acquire)};
+
+  pending_fetch_cb_.emplace(Callback{std::move(callback), new_fetch_dst});
+  auto old_fetch_dst{fetch_dst_.exchange(new_fetch_dst, std::memory_order_release)};
+
+  while (true) {
+    auto new_state{old_state | State::PENDING_FETCH | State::IS_INQUEUE};
+    if (state_.compare_exchange_weak(old_state, new_state, std::memory_order_release, std::memory_order_relaxed)) {
+      if ((old_state & State::IS_INQUEUE) == 0) {
+        to_worker_shard_->pending_queue_.Push(this);
+      }
+      break;
     }
   }
-  if (old_temp_frame != nullptr && need_deallocate) {
-    to_worker_shard_->temp_frame_buffer_.Deallocate(old_temp_frame);
-  }
+
+  to_worker_shard_->temp_frame_buffer_.TryDeallocate(old_fetch_dst);
 }
 
-auto DiskScheduler::PageTaskBlock::GatherAllTasks(std::vector<DiskSchedulerPromise> &flush_cb,
-                                                  std::vector<DiskSchedulerPromise> &fetch_cb)
-    -> std::tuple<char *, bool, char *, bool> {
-  flush_cb.reserve(pending_flush_cb_.size());
-  fetch_cb.reserve(pending_fetch_cb_.size());
-  {
-    std::lock_guard lk{m_};
-    flush_cb.insert(flush_cb.end(), std::make_move_iterator(pending_flush_cb_.begin()),
-                    std::make_move_iterator(pending_flush_cb_.end()));
-    fetch_cb.insert(fetch_cb.end(), std::make_move_iterator(pending_fetch_cb_.begin()),
-                    std::make_move_iterator(pending_fetch_cb_.end()));
-    pending_flush_cb_.clear();
-    pending_fetch_cb_.clear();
-    is_inqueue_ = false;
-    return {std::exchange(flush_src_, nullptr), std::exchange(flush_src_is_deallocable_, false),
-            std::exchange(fetch_dst_, nullptr), std::exchange(fetch_dst_is_deallocable_, false)};
+auto DiskScheduler::PageTaskBlock::GatherFlushTask(std::vector<DiskSchedulerPromise> &flush_cb) -> char * {
+  char *ret_flush_src{};
+  while (true) {
+    /**
+     * 仅 unset `PENDING_FLUSH`.
+     * 若末尾 `PENDING_FLUSH` 被再次设置, 则说明有新的 Flush 到来.
+     */
+    auto old_state{state_.fetch_and(~State::PENDING_FLUSH, std::memory_order_acquire)};
+
+    char *gathered_flush_src{flush_src_.exchange(nullptr, std::memory_order_acquire)};
+    if (gathered_flush_src == nullptr) {
+      BUSTUB_ASSERT(ret_flush_src != nullptr || flush_cb.empty(), "Unexpected.");
+      return ret_flush_src;
+    }
+
+    // `gathered_flush_src != nullptr`.
+    if (ret_flush_src != nullptr) {
+      to_worker_shard_->temp_frame_buffer_.TryDeallocate(ret_flush_src);
+    }
+    ret_flush_src = gathered_flush_src;
+
+    Callback cur_cb{};
+    while (true) {
+      bool check{pending_flush_cb_.try_dequeue(cur_cb)};
+      BUSTUB_ASSERT(check, "Unexpected.");
+      if (cur_cb.callback_opt_.has_value()) {
+        flush_cb.emplace_back(std::move(cur_cb.callback_opt_.value()));
+      }
+      if (cur_cb.validation_ptr_ == ret_flush_src) {
+        break;
+      }
+    }
+
+    old_state = state_.load(std::memory_order_relaxed);
+    if ((old_state & State::PENDING_FLUSH) == 0) {
+      break;
+    }
+    /**
+     * `state_` 被再次置位 `PENDING_FLUSH`.
+     */
   }
+  BUSTUB_ASSERT(ret_flush_src != nullptr || flush_cb.empty(), "Unexpected.");
+  return ret_flush_src;
+}
+
+auto DiskScheduler::PageTaskBlock::GatherFetchTask(std::vector<DiskSchedulerPromise> &fetch_cb) -> char * {
+  char *ret_fetch_dst{};
+  while (true) {
+    /**
+     * 仅 unset `PENDING_FETCH`.
+     * 若末尾 `PENDING_FETCH` 被再次设置, 则说明有新的 Fetch 到来.
+     */
+    auto old_state{state_.fetch_and(~State::PENDING_FETCH, std::memory_order_acquire)};
+
+    char *gathered_fetch_dst{fetch_dst_.exchange(nullptr, std::memory_order_acquire)};
+    if (gathered_fetch_dst == nullptr) {
+      BUSTUB_ASSERT(ret_fetch_dst != nullptr || fetch_cb.empty(), "Unexpected.");
+      return ret_fetch_dst;
+    }
+
+    // `gathered_fetch_dst != nullptr`.
+    if (ret_fetch_dst != nullptr) {
+      to_worker_shard_->temp_frame_buffer_.TryDeallocate(ret_fetch_dst);
+    }
+    ret_fetch_dst = gathered_fetch_dst;
+
+    Callback cur_cb{};
+    while (true) {
+      bool check{pending_fetch_cb_.try_dequeue(cur_cb)};
+      BUSTUB_ASSERT(check, "Unexpected.");
+      if (cur_cb.callback_opt_.has_value()) {
+        fetch_cb.emplace_back(std::move(cur_cb.callback_opt_.value()));
+      }
+      if (cur_cb.validation_ptr_ == ret_fetch_dst) {
+        break;
+      }
+    }
+
+    old_state = state_.load(std::memory_order_relaxed);
+    if ((old_state & State::PENDING_FETCH) == 0) {
+      break;
+    }
+    /**
+     * `state_` 被再次置位 `PENDING_FETCH`.
+     */
+  }
+  BUSTUB_ASSERT(ret_fetch_dst != nullptr || fetch_cb.empty(), "Unexpected.");
+  return ret_fetch_dst;
+}
+
+auto DiskScheduler::PageTaskBlock::TrySetDequeued() -> bool {
+  auto old_state{state_.load(std::memory_order_relaxed)};
+
+  BUSTUB_ASSERT((old_state & State::IS_INQUEUE), "Unexpected.");
+
+  if (old_state != State::IS_INQUEUE) {
+    // 存在 `PENDING_*`.
+    return false;
+  }
+
+  std::uint8_t expected_state{State::IS_INQUEUE};
+  return state_.compare_exchange_strong(expected_state, State::EMPTY, std::memory_order_relaxed,
+                                        std::memory_order_relaxed);
 }
 
 // ========================================
@@ -122,14 +215,10 @@ auto DiskScheduler::PageTaskBlock::GatherAllTasks(std::vector<DiskSchedulerPromi
 // DiskScheduler::PageTaskTable
 //
 // ========================================
-DiskScheduler::PageTaskTable::PageTaskTable() : shards_(PAGETASKTABLESHARD_CNT) {
-  for (auto &shard : shards_) {
-    shard = std::make_unique<PageTaskTableShard>();
-  }
-}
+DiskScheduler::PageTaskTable::PageTaskTable() : shards_(simple_cu::utils::concurrency * SHARD_FACTOR) {}
 
 auto DiskScheduler::PageTaskTable::VisitShard(page_id_t page_id) -> PageTaskTableShard * {
-  return shards_[FastHash{}(page_id, 2) % shards_.size()].get();
+  return &shards_[FastHash{}(page_id, 2) % shards_.size()];
 }
 
 // ========================================
@@ -137,14 +226,10 @@ auto DiskScheduler::PageTaskTable::VisitShard(page_id_t page_id) -> PageTaskTabl
 // DiskScheduler::WorkerTable
 //
 // ========================================
-DiskScheduler::WorkerTable::WorkerTable() : shards_(WORKERSHARD_CNT) {
-  for (auto &shard : shards_) {
-    shard = std::make_unique<WorkerShard>();
-  }
-}
+DiskScheduler::WorkerTable::WorkerTable() : shards_(simple_cu::utils::concurrency * SHARD_FACTOR) {}
 
 auto DiskScheduler::WorkerTable::VisitShard(page_id_t page_id) -> WorkerShard * {
-  return shards_[FastHash{}(page_id, 1) % shards_.size()].get();
+  return &shards_[FastHash{}(page_id, 1) % shards_.size()];
 }
 
 // ========================================
@@ -152,13 +237,11 @@ auto DiskScheduler::WorkerTable::VisitShard(page_id_t page_id) -> WorkerShard * 
 // DiskScheduler
 //
 // ========================================
-DiskScheduler::DiskScheduler(DiskManager *disk_manager) : disk_manager_(disk_manager) {
+DiskScheduler::DiskScheduler(DiskManager *disk_manager)
+    : disk_manager_(disk_manager), worker_(simple_cu::utils::concurrency * SHARD_FACTOR) {
   fmt::println("DiskScheduler: SHARD_CNT {}.", simple_cu::utils::concurrency);
-  for (size_t i = 0; i < worker_table_.shards_.size(); i++) {
-    auto to_worker_shard{worker_table_.shards_[i].get()};
-    for (auto &worker : to_worker_shard->worker_) {
-      worker = std::thread{[this, i] { this->StartWorkerThread(i); }};
-    }
+  for (size_t i = 0; i < worker_.size(); i++) {
+    worker_[i] = std::thread{[this, i]() { this->StartWorkerThread(i); }};
   }
 }
 
@@ -168,14 +251,10 @@ DiskScheduler::~DiskScheduler() {
    * 如果未来支持单 Shard 多 worker, 此处需要投递多个 `nullptr`.
    */
   for (auto &shard : worker_table_.shards_) {
-    for (size_t i = 0; i < shard->worker_.size(); i++) {
-      shard->pending_queue_.Push(nullptr);
-    }
+    shard.pending_queue_.Push(nullptr);
   }
-  for (auto &shard : worker_table_.shards_) {
-    for (auto &worker : shard->worker_) {
-      worker.join();
-    }
+  for (auto &worker : worker_) {
+    worker.join();
   }
 }
 
@@ -192,7 +271,7 @@ auto DiskScheduler::Schedule(DiskRequest r) -> bool {
   BUSTUB_ASSERT(r.page_id_ != INVALID_PAGE_ID, "Unexpected.");
   auto *to_shard{worker_table_.VisitShard(r.page_id_)};
 
-  auto to_task_table{to_shard->ptb_table_.VisitShard(r.page_id_)};
+  auto to_task_table{global_ptb_table_.VisitShard(r.page_id_)};
   PageTaskBlock *to_ptb{};
 
   /**
@@ -202,7 +281,8 @@ auto DiskScheduler::Schedule(DiskRequest r) -> bool {
   if (auto iter{cached_ptb_table.find(r.page_id_)}; iter == cached_ptb_table.end()) {
     {
       std::lock_guard lk{to_task_table->m_};
-      to_ptb = &to_task_table->table_.try_emplace(r.page_id_, r.page_id_, to_shard).first->second;
+      to_ptb = to_task_table->table_.try_emplace(r.page_id_, std::make_unique<PageTaskBlock>(r.page_id_, to_shard))
+                   .first->second.get();
     }
     cached_ptb_table.emplace(r.page_id_, to_ptb);
   } else {
@@ -217,24 +297,24 @@ auto DiskScheduler::Schedule(DiskRequest r) -> bool {
 
       if (r.data_ == nullptr) {
         temp_frame = to_shard->temp_frame_buffer_.Allocate();
-        to_ptb->SubmitFlushSrc(temp_frame, true, std::move(r.callback_));
+        to_ptb->SubmitFlushTask(temp_frame, true, std::move(r.callback_));
         return true;
       }
 
       if (!to_shard->temp_frame_buffer_.TryAllocate(temp_frame)) {
-        to_ptb->SubmitFlushSrc(r.data_, false, std::move(r.callback_));
+        to_ptb->SubmitFlushTask(r.data_, false, std::move(r.callback_));
         return false;
       }
 
       std::memcpy(temp_frame, r.data_, BUSTUB_PAGE_SIZE);
-      to_ptb->SubmitFlushSrc(temp_frame, true, std::move(r.callback_));
+      to_ptb->SubmitFlushTask(temp_frame, true, std::move(r.callback_));
     } else {
       BUSTUB_ASSERT(r.data_ != nullptr, "Unexpected.");
-      to_ptb->SubmitFlushSrc(r.data_, false, std::move(r.callback_));
+      to_ptb->SubmitFlushTask(r.data_, false, std::move(r.callback_));
     }
   } else {  // Fetch
     BUSTUB_ASSERT(r.async_hint_ == false, "Unexpected.");
-    to_ptb->SubmitFetchDst(r.data_, false, std::move(r.callback_));
+    to_ptb->SubmitFetchTask(r.data_, false, std::move(r.callback_));
   }
   return r.async_hint_;
 }
@@ -248,9 +328,12 @@ auto DiskScheduler::Schedule(DiskRequest r) -> bool {
  * return until ~DiskScheduler() is called. At that point you need to make sure that the function does return.
  */
 void DiskScheduler::StartWorkerThread(size_t shard_id) {
-  auto to_worker_shard{worker_table_.shards_[shard_id].get()};
+  // auto to_worker_shard{worker_table_.shards_[shard_id].get()};
+  auto to_worker_shard{&worker_table_.shards_[shard_id]};
   std::vector<DiskSchedulerPromise> fetch_cb{};
+  fetch_cb.reserve(8);
   std::vector<DiskSchedulerPromise> flush_cb{};
+  flush_cb.reserve(8);
 
   while (true) {
     PageTaskBlock *to_ptb{to_worker_shard->pending_queue_.Pop()};
@@ -260,14 +343,11 @@ void DiskScheduler::StartWorkerThread(size_t shard_id) {
       }
       break;
     }
-    page_id_t processing_page_id{to_ptb->ptb_page_id_};
+    page_id_t const processing_page_id{to_ptb->ptb_page_id_};
 
     while (true) {
-      auto [flush_src, flush_need_deallocate, fetch_dst,
-            fetch_need_deallocate]{to_ptb->GatherAllTasks(flush_cb, fetch_cb)};
-      if (flush_src == nullptr && fetch_dst == nullptr) {
-        break;
-      }
+      auto flush_src{to_ptb->GatherFlushTask(flush_cb)};
+      auto fetch_dst{to_ptb->GatherFetchTask(fetch_cb)};
 
       if (fetch_dst != nullptr && flush_src != nullptr) {
         /**
@@ -277,42 +357,36 @@ void DiskScheduler::StartWorkerThread(size_t shard_id) {
         for (auto &cb : fetch_cb) {
           cb.set_value(true);
         }
-        fetch_cb.clear();
         disk_manager_->WritePage(processing_page_id, flush_src);
         for (auto &cb : flush_cb) {
           cb.set_value(true);
         }
-        flush_cb.clear();
-        if (fetch_need_deallocate) {
-          to_worker_shard->temp_frame_buffer_.Deallocate(fetch_dst);
+        to_worker_shard->temp_frame_buffer_.TryDeallocate(fetch_dst);
+        to_worker_shard->temp_frame_buffer_.TryDeallocate(flush_src);
+      } else {
+        if (flush_src != nullptr) {
+          disk_manager_->WritePage(processing_page_id, flush_src);
+          for (auto &cb : flush_cb) {
+            cb.set_value(true);
+          }
+          to_worker_shard->temp_frame_buffer_.TryDeallocate(flush_src);
         }
-        if (flush_need_deallocate) {
-          to_worker_shard->temp_frame_buffer_.Deallocate(flush_src);
+        if (fetch_dst != nullptr) {
+          disk_manager_->ReadPage(processing_page_id, fetch_dst);
+          for (auto &cb : fetch_cb) {
+            cb.set_value(true);
+          }
+          to_worker_shard->temp_frame_buffer_.TryDeallocate(fetch_dst);
         }
+      }
+
+      flush_cb.clear();
+      fetch_cb.clear();
+
+      if (!to_ptb->TrySetDequeued()) {
         continue;
       }
-
-      if (flush_src != nullptr) {
-        disk_manager_->WritePage(processing_page_id, flush_src);
-        for (auto &cb : flush_cb) {
-          cb.set_value(true);
-        }
-        flush_cb.clear();
-        if (flush_need_deallocate) {
-          to_worker_shard->temp_frame_buffer_.Deallocate(flush_src);
-        }
-      }
-
-      if (fetch_dst != nullptr) {
-        disk_manager_->ReadPage(processing_page_id, fetch_dst);
-        for (auto &cb : fetch_cb) {
-          cb.set_value(true);
-        }
-        fetch_cb.clear();
-        if (fetch_need_deallocate) {
-          to_worker_shard->temp_frame_buffer_.Deallocate(fetch_dst);
-        }
-      }
+      break;
     }
   }
 }

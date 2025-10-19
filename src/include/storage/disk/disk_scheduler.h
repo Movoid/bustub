@@ -21,6 +21,7 @@
 #include <unordered_map>
 
 #include "common/macros.h"
+#include "readerwriterqueue/readerwriterqueue.h"
 #include "storage/disk/disk_manager.h"
 
 // ============================================================
@@ -1202,9 +1203,11 @@ class ConcurrentTempFrameBuffer {
    */
 
   simple_cu::utils::SimpleConcurrentQueue<char *> available_frames_;
+  size_t base_frame_cnt_;
+  char *base_;
 
  public:
-  explicit ConcurrentTempFrameBuffer(size_t temp_frame_cnt);
+  explicit ConcurrentTempFrameBuffer(size_t base_frame_cnt);
   ConcurrentTempFrameBuffer(const ConcurrentTempFrameBuffer &) = delete;
   auto operator=(const ConcurrentTempFrameBuffer &) -> ConcurrentTempFrameBuffer & = delete;
   ConcurrentTempFrameBuffer(ConcurrentTempFrameBuffer &) = delete;
@@ -1218,6 +1221,8 @@ class ConcurrentTempFrameBuffer {
   auto Allocate() -> char *;
   auto TryAllocate(char *&res) -> bool;
   void Deallocate(char *ptr);
+  auto IsDeallocatable(const char *ptr) -> bool;
+  auto TryDeallocate(char *ptr) -> bool;
 };
 
 /**
@@ -1264,10 +1269,8 @@ class DiskScheduler {
   /** Pointer to the disk manager. */
   DiskManager *disk_manager_ __attribute__((__unused__));
 
-  constexpr static size_t WORKERSHARD_CNT{16};
-  constexpr static size_t PAGETASKTABLESHARD_CNT{20};
-  constexpr static size_t TEMPFRAME_CNT_PERSHARD{8};
-  constexpr static size_t WORKERCNT_PERSHARD{1};
+  constexpr static std::size_t SHARD_FACTOR{2};
+  constexpr static std::size_t TEMPFRAME_CNT_PERSHARD{8};
 
   struct PageTaskBlock;
 
@@ -1275,12 +1278,15 @@ class DiskScheduler {
    * PTB 表.
    */
   struct PageTaskTable {
+    /**
+     * Shard 存 ptr 避免扩容改变地址.
+     */
     struct alignas(simple_cu::utils::CACHELINE_SIZE) PageTaskTableShard {
       std::mutex m_;
-      std::unordered_map<page_id_t, PageTaskBlock> table_;
+      std::unordered_map<page_id_t, std::unique_ptr<PageTaskBlock>> table_;
     };
 
-    std::vector<std::unique_ptr<PageTaskTableShard>> shards_;
+    std::vector<PageTaskTableShard> shards_;
 
     PageTaskTable();
     auto VisitShard(page_id_t page_id) -> PageTaskTableShard *;
@@ -1290,17 +1296,15 @@ class DiskScheduler {
    * Worker 表.
    */
   struct WorkerTable {
+    /**
+     * `pending_queue_` 应该改成 bucket 电梯调度.
+     */
     struct alignas(simple_cu::utils::CACHELINE_SIZE) WorkerShard {
-      /**
-       * `pending_queue_` 应该改成 bucket 电梯调度.
-       */
       simple_cu::utils::SimpleConcurrentQueue<PageTaskBlock *> pending_queue_;
       ConcurrentTempFrameBuffer temp_frame_buffer_{TEMPFRAME_CNT_PERSHARD};
-      alignas(simple_cu::utils::CACHELINE_SIZE) PageTaskTable ptb_table_;
-      std::array<std::thread, WORKERCNT_PERSHARD> worker_;
     };
 
-    std::vector<std::unique_ptr<WorkerShard>> shards_;
+    std::vector<WorkerShard> shards_;
 
     WorkerTable();
     auto VisitShard(page_id_t page_id) -> WorkerShard *;
@@ -1311,39 +1315,65 @@ class DiskScheduler {
    * 每个 `WorkerShard` 都 own 部分 `PageTaskBlock`.
    */
   struct alignas(simple_cu::utils::CACHELINE_SIZE) PageTaskBlock {
-    /**
-     * 若同时存在两种任务,
-     * 则直接将 Flush `data_` 拷贝到 Fetch `data_`.
-     * 这发生在 Flush 后立刻需要 Fetch 的情况.
-     */
-    std::mutex m_;
-    char *flush_src_{};
-    char *fetch_dst_{};
-    bool flush_src_is_deallocable_{false};
-    bool fetch_dst_is_deallocable_{false};
+    struct Callback {
+      std::optional<DiskSchedulerPromise> callback_opt_;
+      char *validation_ptr_;
+    };
 
     /**
-     * Callbacks 使用 `std::vector` 存储.
+     * `PENDING_*` 和 `IS_INQUEUE` 必须是原子的,
+     * `PENDING_*` 的变化必须阻止 unset `IS_INQUEUE`.
      */
-    std::vector<DiskSchedulerPromise> pending_flush_cb_;
-    std::vector<DiskSchedulerPromise> pending_fetch_cb_;
-    bool is_inqueue_{};
+    enum State : std::uint8_t {
+      EMPTY = 0,
+      PENDING_FLUSH = 1ULL << 0,
+      PENDING_FETCH = 1ULL << 1,
+      IS_INQUEUE = 1ULL << 2,
+    };
 
     /**
-     * 用于向 `WorkerShard` enqueue.
+     * Producer 先存 callback, 再存 pointer.
+     * Consumer 先取 pointer, 再取 callback.
+     *
+     * 同一时间, 必须保证只有一个 Producer 能发起对一个 page 的 flush/fetch.
+     * 一个 page 同一时间只能由一个 worker 处理任务.
      */
-    alignas(simple_cu::utils::CACHELINE_SIZE) page_id_t ptb_page_id_{INVALID_PAGE_ID};
-    WorkerTable::WorkerShard *to_worker_shard_{};
+
+    /**
+     * 考虑连续对同一个 ptr 发起 Flush 的情况.
+     * 首先, 这不可能是 async 请求, 因为 ptr 尚未被回收, 无法重用.
+     * 如果是同步, 在上一个 Flush 还未完成的情况下, 不可能再次 Flush.
+     * 则, `pending_*_cb_` 中不可能存在相同 `validation_ptr_` 的 Callback.
+     *
+     * > 由上,
+     * > Worker 从 `pending_*_cb_` 取出和当前 ptr 匹配的 Callback 即可直接返回.
+     */
+
+    std::atomic<char *> flush_src_{};  // Tagged Pointer.
+    std::atomic<char *> fetch_dst_{};
+    moodycamel::ReaderWriterQueue<Callback> pending_flush_cb_;
+    moodycamel::ReaderWriterQueue<Callback> pending_fetch_cb_;
+
+    std::atomic<std::underlying_type_t<State>> state_{};
+
+    /**
+     * Shared 字段.
+     */
+    alignas(simple_cu::utils::CACHELINE_SIZE) page_id_t const ptb_page_id_{INVALID_PAGE_ID};
+    WorkerTable::WorkerShard *const to_worker_shard_;
 
     PageTaskBlock(page_id_t page_id, WorkerTable::WorkerShard *to_worker_shard);
 
-    void SubmitFlushSrc(char *new_flush_src, bool is_deallocatable, DiskSchedulerPromise &&callback);
-    void SubmitFetchDst(char *new_fetch_dst, bool is_deallocatable, DiskSchedulerPromise &&callback);
-    auto GatherAllTasks(std::vector<DiskSchedulerPromise> &flush_cb, std::vector<DiskSchedulerPromise> &fetch_cb)
-        -> std::tuple<char *, bool, char *, bool>;
+    void SubmitFlushTask(char *new_flush_src, bool is_deallocable, DiskSchedulerPromise &&callback);
+    void SubmitFetchTask(char *new_fetch_dst, bool is_deallocable, DiskSchedulerPromise &&callback);
+    auto GatherFlushTask(std::vector<DiskSchedulerPromise> &flush_cb) -> char *;
+    auto GatherFetchTask(std::vector<DiskSchedulerPromise> &fetch_cb) -> char *;
+    auto TrySetDequeued() -> bool;
   };
 
   WorkerTable worker_table_;
+  PageTaskTable global_ptb_table_;
+  std::vector<std::thread> worker_;
 
   std::atomic<bool> stop_{};
 };

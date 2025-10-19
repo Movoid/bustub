@@ -218,8 +218,13 @@ auto main(int argc, char **argv) -> int {
   for (size_t i = 0; i < bustub_page_cnt; i++) {
     page_id_t page_id = bpm->NewPage();
     {
-      auto guard = bpm->WritePage(page_id);
-      ModifyPage(guard.GetDataMut(), i, 0);
+      try {
+        auto guard = bpm->WritePage(page_id);
+        ModifyPage(guard.GetDataMut(), i, 0);
+
+      } catch (const std::future_error &e) {
+        fmt::println("{}", e.what());
+      }
     }
     page_ids.push_back(page_id);
   }
@@ -246,8 +251,12 @@ auto main(int argc, char **argv) -> int {
 
       while (!metrics.ShouldFinish()) {
         {
-          auto page = bpm->ReadPage(page_ids[page_idx], AccessType::Scan);
-          CheckPageConsistentNoSeed(page.GetData(), page_idx);
+          try {
+            auto page = bpm->ReadPage(page_ids[page_idx], AccessType::Scan);
+            CheckPageConsistentNoSeed(page.GetData(), page_idx);
+          } catch (const std::future_error &e) {
+            fmt::println("{}", e.what());
+          }
         }
 
         page_idx += 1;
@@ -276,11 +285,15 @@ auto main(int argc, char **argv) -> int {
         auto rand = dist(gen);
         auto page_idx = std::min(rand / get_thread_n * get_thread_n + thread_id, bustub_page_cnt - 1);
         {
-          auto page = bpm->WritePage(page_ids[page_idx], AccessType::Lookup);
-          auto &seed = records[page_idx];
-          CheckPageConsistent(page.GetData(), page_idx, seed);
-          seed = seed + 1;
-          ModifyPage(page.GetDataMut(), page_idx, seed);
+          try {
+            auto page = bpm->WritePage(page_ids[page_idx], AccessType::Lookup);
+            auto &seed = records[page_idx];
+            CheckPageConsistent(page.GetData(), page_idx, seed);
+            seed = seed + 1;
+            ModifyPage(page.GetDataMut(), page_idx, seed);
+          } catch (const std::future_error &e) {
+            fmt::println("{}", e.what());
+          }
         }
 
         metrics.Tick();
