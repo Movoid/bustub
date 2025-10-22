@@ -1376,5 +1376,15 @@ class DiskScheduler {
   std::vector<std::thread> worker_;
 
   std::atomic<bool> stop_{};
+
+  /**
+   * Thread local cached ptb table.
+   */
+  struct InstanceBindedTLSBlock {
+    std::unordered_map<page_id_t, PageTaskBlock *> cached_ptb_table_;
+  };
+  inline static std::atomic<std::uint64_t> next_instance_id{};
+  const std::uint64_t instance_id_{};
+  thread_local inline static std::unordered_map<std::uint64_t, InstanceBindedTLSBlock> tls_map;
 };
 }  // namespace bustub

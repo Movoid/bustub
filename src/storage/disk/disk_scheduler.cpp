@@ -46,7 +46,7 @@ auto ConcurrentTempFrameBuffer::TryAllocate(char *&res) -> bool { return availab
 void ConcurrentTempFrameBuffer::Deallocate(char *ptr) { available_frames_.Push(ptr); }
 
 auto ConcurrentTempFrameBuffer::IsDeallocatable(const char *ptr) -> bool {
-  return base_ <= ptr && ptr < base_ + base_frame_cnt_ * BUSTUB_PAGE_SIZE;
+  return base_ <= ptr && ptr < base_ + (base_frame_cnt_ * BUSTUB_PAGE_SIZE);
 }
 
 auto ConcurrentTempFrameBuffer::TryDeallocate(char *ptr) -> bool {
@@ -238,7 +238,9 @@ auto DiskScheduler::WorkerTable::VisitShard(page_id_t page_id) -> WorkerShard * 
 //
 // ========================================
 DiskScheduler::DiskScheduler(DiskManager *disk_manager)
-    : disk_manager_(disk_manager), worker_(simple_cu::utils::concurrency * SHARD_FACTOR) {
+    : disk_manager_(disk_manager),
+      worker_(simple_cu::utils::concurrency * SHARD_FACTOR),
+      instance_id_{next_instance_id.fetch_add(1, std::memory_order_relaxed)} {
   fmt::println("DiskScheduler: SHARD_CNT {}.", simple_cu::utils::concurrency);
   for (size_t i = 0; i < worker_.size(); i++) {
     worker_[i] = std::thread{[this, i]() { this->StartWorkerThread(i); }};
@@ -277,14 +279,14 @@ auto DiskScheduler::Schedule(DiskRequest r) -> bool {
   /**
    * Thread local cached map.
    */
-  static thread_local std::unordered_map<page_id_t, PageTaskBlock *> cached_ptb_table;
-  if (auto iter{cached_ptb_table.find(r.page_id_)}; iter == cached_ptb_table.end()) {
+  auto to_cached_ptb_table{&tls_map[instance_id_].cached_ptb_table_};
+  if (auto iter{to_cached_ptb_table->find(r.page_id_)}; iter == to_cached_ptb_table->end()) {
     {
       std::lock_guard lk{to_task_table->m_};
       to_ptb = to_task_table->table_.try_emplace(r.page_id_, std::make_unique<PageTaskBlock>(r.page_id_, to_shard))
                    .first->second.get();
     }
-    cached_ptb_table.emplace(r.page_id_, to_ptb);
+    to_cached_ptb_table->emplace(r.page_id_, to_ptb);
   } else {
     to_ptb = iter->second;
   }
