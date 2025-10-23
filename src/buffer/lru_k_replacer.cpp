@@ -226,6 +226,7 @@ auto ShardingLRUKReplacer::LRUKNode::RecordTime(std::uint64_t time) -> std::uint
 }
 
 void ShardingLRUKReplacer::LRUKNode::ResetHistory() {
+  BUSTUB_ASSERT(GetPinCnt() == 1, "Unexpected.");
   history_[0] = 0;
   visit_counter_ = 0;
 }
@@ -248,7 +249,7 @@ auto ShardingLRUKReplacer::LRUKNode::Unpin() -> std::uint64_t { return pin_cnt_-
 
 auto ShardingLRUKReplacer::LRUKNode::GetPinCnt() -> std::uint64_t { return pin_cnt_; }
 
-auto ShardingLRUKReplacer::LRUKNode::IsEvictable() -> bool { return pin_cnt_ == 0; }
+auto ShardingLRUKReplacer::LRUKNode::IsPinned() -> bool { return pin_cnt_ > 0; }
 
 // ========================================
 //
@@ -299,8 +300,10 @@ auto ShardingLRUKReplacer::LRUKReplacerTable::LRUKReplacerShard::PinUnsafe(Shard
   if (old_pin_cnt == 0) {
     auto to_heap{old_is_hot ? &hot_heap_ : &cold_heap_};
     auto to_cnt_approx{old_is_hot ? &hot_evictable_cnt_approx_ : &cold_evictable_cnt_approx_};
-    // BUSTUB_ASSERT(to_heap->Contains(to_node), "Unexpected.");
-    // 初始时, Heap 空, 允许此时 `PinUnsafe` 不操作 Heap.
+    /**
+     * Update: 初始时 Heap 含所有 `LRUKNode`.
+     */
+    BUSTUB_ASSERT(to_heap->Contains(to_node), "Unexpected.");
     if (to_heap->Contains(to_node)) {
       to_heap->Erase(to_node);
       to_cnt_approx->fetch_sub(1, std::memory_order_relaxed);
@@ -353,8 +356,15 @@ auto ShardingLRUKReplacer::LRUKReplacerTable::VisitShard(frame_id_t frame_id) ->
 ShardingLRUKReplacer::ShardingLRUKReplacer(size_t num_frames, size_t k)
     : max_size_{num_frames}, k_(k), table_(std::max(1, static_cast<int>(num_frames / MAX_FRAME_PER_SHARD))) {
   BUSTUB_ASSERT(num_frames < std::numeric_limits<frame_id_t>::max(), "Invalid args.");
-  for (size_t i = 0; i < num_frames; i++) {
+  for (std::size_t i = 0; i < num_frames; i++) {
     nodes_.emplace_back(static_cast<frame_id_t>(i), k);
+  }
+  for (frame_id_t i = 0; i < static_cast<frame_id_t>(num_frames); i++) {
+    auto to_shard{table_.VisitShard(i)};
+    to_shard->cold_heap_.Push(&nodes_[i], 0);
+  }
+  for (auto &ref_shard : table_.shards_) {
+    ref_shard.cold_evictable_cnt_approx_.fetch_add(ref_shard.cold_heap_.Size(), std::memory_order_relaxed);
   }
 }
 
@@ -382,9 +392,18 @@ auto ShardingLRUKReplacer::SelectEvictAndPin() -> std::optional<frame_id_t> {
       LOG_WARN("ShardingLRUKReplacer retried too many times!");
       for (std::size_t iter = 0; iter < table_.shards_.size(); iter++) {
         auto to_iter_shard{&table_.shards_[(shard_id + iter) % table_.shards_.size()]};
-        if (to_iter_shard->ColdEvictableSizeApprox() + to_iter_shard->HotEvictableSizeApprox() > 0) {
+        if (to_iter_shard->ColdEvictableSizeApprox() > 0) {
           to_shard = to_iter_shard;
           break;
+        }
+      }
+      if (to_shard->ColdEvictableSizeApprox() == 0) {
+        for (std::size_t iter = 0; iter < table_.shards_.size(); iter++) {
+          auto to_iter_shard{&table_.shards_[(shard_id + iter) % table_.shards_.size()]};
+          if (to_iter_shard->ColdEvictableSizeApprox() + to_iter_shard->HotEvictableSizeApprox() > 0) {
+            to_shard = to_iter_shard;
+            break;
+          }
         }
       }
       if (to_shard->ColdEvictableSizeApprox() + to_shard->HotEvictableSizeApprox() == 0) {
@@ -456,6 +475,13 @@ auto ShardingLRUKReplacer::TryCommitEvict(frame_id_t frame_id) -> bool {
     }
 
     to_node->ResetHistory();
+
+    /**
+     * 即使 `TryCommitEvict` 成功,
+     * 上层也可能希望 `Unpin` 取消使用此 frame.
+     * 让上层 `RecordTime`.
+     */
+    // to_node->RecordTime(to_shard->time_counter_++);
     return true;
   }
 }
@@ -480,6 +506,31 @@ void ShardingLRUKReplacer::Unpin(frame_id_t frame_id) {
   }
 }
 
+auto ShardingLRUKReplacer::GetPinCnt(frame_id_t frame_id) -> std::uint64_t {
+  auto to_shard{table_.VisitShard(frame_id)};
+  auto to_node{&nodes_[frame_id]};
+
+  {
+    std::lock_guard lk{to_shard->m_};
+    return to_node->GetPinCnt();
+  }
+}
+
+/**
+ * 可以将 `LRUKNode` 实现成无锁修改,
+ * 但需要维护一个多生产者 RingBuffer.
+ * Keep it simple.
+ */
+void ShardingLRUKReplacer::PinAndRecordAccess(frame_id_t frame_id, AccessType access_type) {
+  auto to_shard{table_.VisitShard(frame_id)};
+  auto to_node{&nodes_[frame_id]};
+  {
+    std::lock_guard lk{to_shard->m_};
+    to_shard->PinUnsafe(to_node);
+    to_node->RecordTime(to_shard->time_counter_++);
+  }
+}
+
 /**
  * 可以将 `LRUKNode` 实现成无锁修改,
  * 但需要维护一个多生产者 RingBuffer.
@@ -490,13 +541,42 @@ void ShardingLRUKReplacer::RecordAccess(frame_id_t frame_id, AccessType access_t
   auto to_node{&nodes_[frame_id]};
   {
     std::lock_guard lk{to_shard->m_};
+    bool old_is_hot{to_node->IsHotPage()};
     to_node->RecordTime(to_shard->time_counter_++);
-    if (to_node->IsEvictable()) {
-      auto to_heap{to_node->IsHotPage() ? &to_shard->hot_heap_ : &to_shard->cold_heap_};
-      BUSTUB_ASSERT(to_heap->Contains(to_node), "Unexpected.");
-      to_heap->Modify(to_node, to_node->IsHotPage() ? to_node->GetPreviousKthHistory() : to_node->GetEarliestHistory());
+    if (to_node->IsPinned()) {  // Not in heap.
+      return;
+    }
+    if (to_node->IsHotPage() && !old_is_hot) {  // Move
+      BUSTUB_ASSERT(to_shard->cold_heap_.Contains(to_node), "Unexpected.");
+      BUSTUB_ASSERT(!to_shard->hot_heap_.Contains(to_node), "Unexpected.");
+      to_shard->cold_heap_.Erase(to_node);
+      to_shard->hot_heap_.Push(to_node, to_node->GetPreviousKthHistory());
+    } else if (to_node->IsHotPage()) {
+      BUSTUB_ASSERT(old_is_hot, "Unexpected.");
+      BUSTUB_ASSERT(to_shard->hot_heap_.Contains(to_node), "Unexpected.");
+      to_shard->hot_heap_.Modify(to_node, to_node->GetPreviousKthHistory());
+    } else {
+      BUSTUB_ASSERT(to_shard->cold_heap_.Contains(to_node), "Unexpected.");
+      to_shard->cold_heap_.Modify(to_node, to_node->GetEarliestHistory());
     }
   }
+}
+
+auto ShardingLRUKReplacer::TryResetRecord(frame_id_t frame_id) -> bool {
+  auto to_shard{table_.VisitShard(frame_id)};
+  auto to_node{&nodes_[frame_id]};
+  {
+    std::lock_guard lk{to_shard->m_};
+    if (to_node->IsPinned()) {
+      return false;
+    }
+    // `LRUKNode` 没有 pin.
+    BUSTUB_ASSERT(
+        (to_node->IsHotPage() ? to_shard->hot_heap_.Contains(to_node) : to_shard->cold_heap_.Contains(to_node)),
+        "Unexpected.");
+    to_node->ResetHistory();
+  }
+  return true;
 }
 
 }  // namespace bustub

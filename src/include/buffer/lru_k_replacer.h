@@ -288,10 +288,15 @@ class ShardingLRUKReplacer {
   auto SelectEvictAndPin() -> std::optional<frame_id_t>;
   [[nodiscard]] auto TryCommitEvict(frame_id_t frame_id) -> bool;
 
+  void PinAndRecordAccess(frame_id_t frame_id, AccessType access_type = AccessType::Unknown);
   void Pin(frame_id_t frame_id);
   void Unpin(frame_id_t frame_id);
 
   void RecordAccess(frame_id_t frame_id, AccessType access_type = AccessType::Unknown);
+
+  auto GetPinCnt(frame_id_t frame_id) -> std::uint64_t;
+
+  [[nodiscard]] auto TryResetRecord(frame_id_t frame_id) -> bool;
 
  private:
   // LRUKNode 是 LRUKReplacer 的 metainfo 条目类型,
@@ -330,7 +335,7 @@ class ShardingLRUKReplacer {
 
     auto GetPinCnt() -> std::uint64_t;
 
-    auto IsEvictable() -> bool;
+    auto IsPinned() -> bool;
   };
 
   constexpr static std::size_t MAX_FRAME_PER_SHARD{16};
@@ -355,7 +360,8 @@ class ShardingLRUKReplacer {
      * 可被 Evict 的 frames of unpinned pages.
      * 对于被 Pin `0 -> 1` 的 frame, 直接移出 `heap_`.
      *
-     * > 最初 Heap 是空的.
+     * > Update: 最初 Heap 非空, `cold_heap_` 含所有 `LRUKNode` 且 history 为 `0`,
+     * > 这是为了替代 free list 分配.
      */
     struct alignas(simple_cu::utils::CACHELINE_SIZE) LRUKReplacerShard {
       std::mutex m_;

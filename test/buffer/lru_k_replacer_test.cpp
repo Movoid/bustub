@@ -206,84 +206,86 @@ TEST(LRUKReplacerTest, My_EvictTest) {
   ASSERT_EQ(0, replacer.Size());
 }
 
-TEST(LRUKReplacerTest, DISABLED_ShardingReplacer_Basic) {
-  /**
-   * 需要 ShardingReplacer 仅 1 分片.
-   */
-  ShardingLRUKReplacer replacer{16, 3};
+TEST(LRUKReplacerTest, ShardingReplacer_Basic) {
+  { /**
+     * 需要 ShardingReplacer 仅 1 分片.
+     */
+    ShardingLRUKReplacer replacer{5, 3};
 
-  replacer.Pin(1);
-  replacer.Pin(2);
-  replacer.Pin(3);
-  replacer.Pin(4);
+    replacer.Pin(0);
 
-  replacer.RecordAccess(1);
-  replacer.RecordAccess(2);
-  replacer.RecordAccess(3);
-  replacer.RecordAccess(4);
+    replacer.RecordAccess(1);
+    replacer.RecordAccess(2);
+    replacer.RecordAccess(3);
+    replacer.RecordAccess(4);
 
-  replacer.Unpin(1);
-  replacer.Unpin(2);
-  replacer.Unpin(3);
-  replacer.Unpin(4);
+    auto select1{replacer.SelectEvictAndPin()};
+    auto select2{replacer.SelectEvictAndPin()};
+    ASSERT_EQ(select1.has_value(), true);
+    ASSERT_EQ(select1.value(), 1);
+    ASSERT_EQ(select2.has_value(), true);
+    ASSERT_EQ(select2.value(), 2);
 
-  auto select1{replacer.SelectEvictAndPin()};
-  auto select2{replacer.SelectEvictAndPin()};
-  ASSERT_EQ(select1.has_value(), true);
-  ASSERT_EQ(select1.value(), 1);
-  ASSERT_EQ(select2.has_value(), true);
-  ASSERT_EQ(select2.value(), 2);
+    auto res2{replacer.TryCommitEvict(2)};
+    ASSERT_EQ(res2, true);
+    auto res1{replacer.TryCommitEvict(1)};
+    ASSERT_EQ(res1, true);
 
-  auto res2{replacer.TryCommitEvict(2)};
-  ASSERT_EQ(res2, true);
-  auto res1{replacer.TryCommitEvict(1)};
-  ASSERT_EQ(res1, true);
+    // 1 and 2 are Still pinned.
 
-  // 1 and 2 are Still pinned.
+    auto select3{replacer.SelectEvictAndPin()};
+    ASSERT_EQ(select3.has_value(), true);
+    ASSERT_EQ(select3.value(), 3);
 
-  auto select3{replacer.SelectEvictAndPin()};
-  ASSERT_EQ(select3.has_value(), true);
-  ASSERT_EQ(select3.value(), 3);
+    replacer.Unpin(3);
 
-  replacer.Unpin(3);
+    select3 = replacer.SelectEvictAndPin();
+    ASSERT_EQ(select3.has_value(), true);
+    ASSERT_EQ(select3.value(), 3);
+    replacer.Pin(3);
+    replacer.Pin(3);
+    replacer.Unpin(3);
+    replacer.Unpin(3);
+    auto res3{replacer.TryCommitEvict(3)};
+    ASSERT_EQ(res3, true);
 
-  select3 = replacer.SelectEvictAndPin();
-  ASSERT_EQ(select3.has_value(), true);
-  ASSERT_EQ(select3.value(), 3);
-  replacer.Pin(3);
-  replacer.Pin(3);
-  replacer.Unpin(3);
-  replacer.Unpin(3);
-  auto res3{replacer.TryCommitEvict(3)};
-  ASSERT_EQ(res3, true);
+    auto select4{replacer.SelectEvictAndPin()};
+    ASSERT_EQ(select4.has_value(), true);
+    ASSERT_EQ(select4.value(), 4);
+    auto res4{replacer.TryCommitEvict(4)};
+    ASSERT_EQ(res4, true);
 
-  auto select4{replacer.SelectEvictAndPin()};
-  ASSERT_EQ(select4.has_value(), true);
-  ASSERT_EQ(select4.value(), 4);
-  auto res4{replacer.TryCommitEvict(4)};
-  ASSERT_EQ(res4, true);
+    auto select5{replacer.SelectEvictAndPin()};
+    ASSERT_EQ(select5.has_value(), false);
 
-  auto select5{replacer.SelectEvictAndPin()};
-  ASSERT_EQ(select5.has_value(), false);
+    replacer.Unpin(1);
 
-  replacer.Unpin(1);
+    select1 = replacer.SelectEvictAndPin();
+    ASSERT_EQ(select1.has_value(), true);
+    ASSERT_EQ(select1.value(), 1);
+    replacer.Unpin(1);
+  }
 
-  select1 = replacer.SelectEvictAndPin();
-  ASSERT_EQ(select1.has_value(), true);
-  ASSERT_EQ(select1.value(), 1);
-  replacer.Unpin(1);
+  {
+    ShardingLRUKReplacer replacer{5, 3};
+
+    for (int i = 0; i < 5; i++) {
+      auto select{replacer.SelectEvictAndPin()};
+      ASSERT_EQ(select.has_value(), true);
+    }
+
+    auto select{replacer.SelectEvictAndPin()};
+    ASSERT_EQ(select.has_value(), false);
+  }
 }
 
-TEST(LRUKReplacerTest, DISABLED_ShardingReplacer_LRUK) {
+TEST(LRUKReplacerTest, ShardingReplacer_LRUK) {
   /**
    * 需要 ShardingReplacer 仅 1 分片.
    */
   ShardingLRUKReplacer replacer{5, 3};
 
-  replacer.Pin(1);
-  replacer.Pin(2);
-  replacer.Pin(3);
-  replacer.Pin(4);
+  replacer.Pin(0);
 
   replacer.RecordAccess(1);
   replacer.RecordAccess(1);
@@ -293,10 +295,7 @@ TEST(LRUKReplacerTest, DISABLED_ShardingReplacer_LRUK) {
   replacer.RecordAccess(3);
   replacer.RecordAccess(3);
 
-  replacer.Unpin(1);
-  replacer.Unpin(2);
-  replacer.Unpin(3);
-  replacer.Unpin(4);
+  replacer.RecordAccess(4);
 
   auto select2{replacer.SelectEvictAndPin()};
   ASSERT_EQ(select2.has_value(), true);
@@ -308,9 +307,6 @@ TEST(LRUKReplacerTest, DISABLED_ShardingReplacer_LRUK) {
 
   replacer.RecordAccess(4);
   replacer.RecordAccess(4);
-  replacer.RecordAccess(4);
-
-  replacer.Unpin(4);
 
   auto select1{replacer.SelectEvictAndPin()};
   ASSERT_EQ(select1.has_value(), true);
