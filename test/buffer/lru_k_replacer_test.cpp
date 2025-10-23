@@ -206,4 +206,152 @@ TEST(LRUKReplacerTest, My_EvictTest) {
   ASSERT_EQ(0, replacer.Size());
 }
 
+TEST(LRUKReplacerTest, DISABLED_ShardingReplacer_Basic) {
+  /**
+   * 需要 ShardingReplacer 仅 1 分片.
+   */
+  ShardingLRUKReplacer replacer{16, 3};
+
+  replacer.Pin(1);
+  replacer.Pin(2);
+  replacer.Pin(3);
+  replacer.Pin(4);
+
+  replacer.RecordAccess(1);
+  replacer.RecordAccess(2);
+  replacer.RecordAccess(3);
+  replacer.RecordAccess(4);
+
+  replacer.Unpin(1);
+  replacer.Unpin(2);
+  replacer.Unpin(3);
+  replacer.Unpin(4);
+
+  auto select1{replacer.SelectEvictAndPin()};
+  auto select2{replacer.SelectEvictAndPin()};
+  ASSERT_EQ(select1.has_value(), true);
+  ASSERT_EQ(select1.value(), 1);
+  ASSERT_EQ(select2.has_value(), true);
+  ASSERT_EQ(select2.value(), 2);
+
+  auto res2{replacer.TryCommitEvict(2)};
+  ASSERT_EQ(res2, true);
+  auto res1{replacer.TryCommitEvict(1)};
+  ASSERT_EQ(res1, true);
+
+  // 1 and 2 are Still pinned.
+
+  auto select3{replacer.SelectEvictAndPin()};
+  ASSERT_EQ(select3.has_value(), true);
+  ASSERT_EQ(select3.value(), 3);
+
+  replacer.Unpin(3);
+
+  select3 = replacer.SelectEvictAndPin();
+  ASSERT_EQ(select3.has_value(), true);
+  ASSERT_EQ(select3.value(), 3);
+  replacer.Pin(3);
+  replacer.Pin(3);
+  replacer.Unpin(3);
+  replacer.Unpin(3);
+  auto res3{replacer.TryCommitEvict(3)};
+  ASSERT_EQ(res3, true);
+
+  auto select4{replacer.SelectEvictAndPin()};
+  ASSERT_EQ(select4.has_value(), true);
+  ASSERT_EQ(select4.value(), 4);
+  auto res4{replacer.TryCommitEvict(4)};
+  ASSERT_EQ(res4, true);
+
+  auto select5{replacer.SelectEvictAndPin()};
+  ASSERT_EQ(select5.has_value(), false);
+
+  replacer.Unpin(1);
+
+  select1 = replacer.SelectEvictAndPin();
+  ASSERT_EQ(select1.has_value(), true);
+  ASSERT_EQ(select1.value(), 1);
+  replacer.Unpin(1);
+}
+
+TEST(LRUKReplacerTest, DISABLED_ShardingReplacer_LRUK) {
+  /**
+   * 需要 ShardingReplacer 仅 1 分片.
+   */
+  ShardingLRUKReplacer replacer{5, 3};
+
+  replacer.Pin(1);
+  replacer.Pin(2);
+  replacer.Pin(3);
+  replacer.Pin(4);
+
+  replacer.RecordAccess(1);
+  replacer.RecordAccess(1);
+  replacer.RecordAccess(1);
+
+  replacer.RecordAccess(3);
+  replacer.RecordAccess(3);
+  replacer.RecordAccess(3);
+
+  replacer.Unpin(1);
+  replacer.Unpin(2);
+  replacer.Unpin(3);
+  replacer.Unpin(4);
+
+  auto select2{replacer.SelectEvictAndPin()};
+  ASSERT_EQ(select2.has_value(), true);
+  ASSERT_EQ(select2.value(), 2);
+
+  auto select4{replacer.SelectEvictAndPin()};
+  ASSERT_EQ(select4.has_value(), true);
+  ASSERT_EQ(select4.value(), 4);
+
+  replacer.RecordAccess(4);
+  replacer.RecordAccess(4);
+  replacer.RecordAccess(4);
+
+  replacer.Unpin(4);
+
+  auto select1{replacer.SelectEvictAndPin()};
+  ASSERT_EQ(select1.has_value(), true);
+  ASSERT_EQ(select1.value(), 1);
+}
+
+TEST(LRUKReplacerTest, ShardingReplacer_Deadlock) {
+  /**
+   * 在执行测试前, 将 ShardingReplacer 的 `MAX_FRAME_PER_SHARD` 改为 4.
+   */
+  ShardingLRUKReplacer replacer{16, 4};
+
+  // Init replacer with all evictable frames.
+  for (std::size_t i = 0; i < 16; i++) {
+    replacer.Pin(i);
+    replacer.Unpin(i);
+  }
+
+  std::vector<std::thread> t(2);
+
+  int iter_times{1000};
+
+  auto work{[&]() {
+    for (int iter = 0; iter < iter_times; iter++) {
+      std::array<std::optional<frame_id_t>, 8> arr{};
+      for (std::size_t i = 0; i < 8; i++) {
+        arr[i] = replacer.SelectEvictAndPin();
+        ASSERT_EQ(arr[i].has_value(), true);
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds{5});
+      for (std::size_t i = 0; i < 8; i++) {
+        replacer.Unpin(arr[i].value());
+      }
+    }
+  }};
+
+  t[0] = std::thread{work};
+  t[1] = std::thread{work};
+
+  t[0].join();
+  t[1].join();
+}
+
 }  // namespace bustub
