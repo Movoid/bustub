@@ -18,7 +18,7 @@
 #include <cstring>
 #include <utility>
 #include "common/macros.h"
-#include "fmt/base.h"
+#include "fmt/printf.h"  // Don't change.
 #include "storage/disk/disk_manager.h"
 
 namespace bustub {
@@ -112,7 +112,7 @@ auto DiskScheduler::PageTaskBlock::GatherFlushTask(std::vector<DiskSchedulerProm
      * 仅 unset `PENDING_FLUSH`.
      * 若末尾 `PENDING_FLUSH` 被再次设置, 则说明有新的 Flush 到来.
      */
-    auto old_state{state_.fetch_and(~State::PENDING_FLUSH, std::memory_order_acquire)};
+    state_.fetch_and(~State::PENDING_FLUSH, std::memory_order_acquire);
 
     char *gathered_flush_src{flush_src_.exchange(nullptr, std::memory_order_acquire)};
     if (gathered_flush_src == nullptr) {
@@ -138,7 +138,7 @@ auto DiskScheduler::PageTaskBlock::GatherFlushTask(std::vector<DiskSchedulerProm
       }
     }
 
-    old_state = state_.load(std::memory_order_relaxed);
+    auto old_state{state_.load(std::memory_order_relaxed)};
     if ((old_state & State::PENDING_FLUSH) == 0) {
       break;
     }
@@ -157,7 +157,7 @@ auto DiskScheduler::PageTaskBlock::GatherFetchTask(std::vector<DiskSchedulerProm
      * 仅 unset `PENDING_FETCH`.
      * 若末尾 `PENDING_FETCH` 被再次设置, 则说明有新的 Fetch 到来.
      */
-    auto old_state{state_.fetch_and(~State::PENDING_FETCH, std::memory_order_acquire)};
+    state_.fetch_and(~State::PENDING_FETCH, std::memory_order_acquire);
 
     char *gathered_fetch_dst{fetch_dst_.exchange(nullptr, std::memory_order_acquire)};
     if (gathered_fetch_dst == nullptr) {
@@ -183,7 +183,7 @@ auto DiskScheduler::PageTaskBlock::GatherFetchTask(std::vector<DiskSchedulerProm
       }
     }
 
-    old_state = state_.load(std::memory_order_relaxed);
+    auto old_state{state_.load(std::memory_order_relaxed)};
     if ((old_state & State::PENDING_FETCH) == 0) {
       break;
     }
@@ -241,7 +241,7 @@ DiskScheduler::DiskScheduler(DiskManager *disk_manager)
     : disk_manager_(disk_manager),
       worker_(simple_cu::utils::concurrency * SHARD_FACTOR),
       instance_id_{next_instance_id.fetch_add(1, std::memory_order_relaxed)} {
-  fmt::println("DiskScheduler: SHARD_CNT {}.", simple_cu::utils::concurrency);
+  fmt::println("DiskScheduler: Concurrency {}.", simple_cu::utils::concurrency);
   for (size_t i = 0; i < worker_.size(); i++) {
     worker_[i] = std::thread{[this, i]() { this->StartWorkerThread(i); }};
   }

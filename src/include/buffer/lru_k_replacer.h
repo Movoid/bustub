@@ -142,7 +142,7 @@ class IndexedHeap {
   CmpType cmp_;
 
  protected:
-  static std::size_t Parent(std::size_t i) {
+  static auto Parent(std::size_t i) -> std::size_t {
     assert(i > 0 && "Invalid args.");
     return (i - 1) / 2;
   }
@@ -338,9 +338,10 @@ class ShardingLRUKReplacer {
     auto IsPinned() -> bool;
   };
 
-  constexpr static std::size_t MAX_FRAME_PER_SHARD{16};
+  // `8 ~ 16` 最佳.
+  constexpr static std::size_t MAX_FRAME_PER_SHARD{8};
 
-  std::size_t const max_size_{};
+  [[maybe_unused]] std::size_t const max_size_{};
   std::size_t const k_{};
 
   /**

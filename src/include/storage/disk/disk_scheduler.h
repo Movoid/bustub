@@ -1349,17 +1349,15 @@ class DiskScheduler {
      * > Worker 从 `pending_*_cb_` 取出和当前 ptr 匹配的 Callback 即可直接返回.
      */
 
-    std::atomic<char *> flush_src_{};  // Tagged Pointer.
-    std::atomic<char *> fetch_dst_{};
-    moodycamel::ReaderWriterQueue<Callback> pending_flush_cb_;
-    moodycamel::ReaderWriterQueue<Callback> pending_fetch_cb_;
-
-    std::atomic<std::underlying_type_t<State>> state_{};
-
     /**
      * Shared 字段.
      */
-    alignas(simple_cu::utils::CACHELINE_SIZE) page_id_t const ptb_page_id_{INVALID_PAGE_ID};
+    moodycamel::ReaderWriterQueue<Callback> pending_flush_cb_;
+    moodycamel::ReaderWriterQueue<Callback> pending_fetch_cb_;
+    std::atomic<char *> flush_src_{};  // Tagged Pointer.
+    std::atomic<char *> fetch_dst_{};
+    std::atomic<std::underlying_type_t<State>> state_{};
+    page_id_t const ptb_page_id_{INVALID_PAGE_ID};
     WorkerTable::WorkerShard *const to_worker_shard_;
 
     PageTaskBlock(page_id_t page_id, WorkerTable::WorkerShard *to_worker_shard);

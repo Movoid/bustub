@@ -13,6 +13,7 @@
 #include "buffer/lru_k_replacer.h"
 #include <random>
 #include "common/exception.h"
+#include "common/logger.h"
 
 namespace bustub {
 
@@ -217,7 +218,13 @@ auto LRUKReplacer::Size() -> size_t {
 // ShardingLRUKReplacer::LRUKNode
 //
 // ========================================
-ShardingLRUKReplacer::LRUKNode::LRUKNode(frame_id_t frame_id, size_t k) : frame_id_{frame_id}, k_{k}, history_(k, 0) {};
+
+ShardingLRUKReplacer::LRUKNode::LRUKNode(frame_id_t frame_id, size_t k)
+    : frame_id_{frame_id},  //
+      k_{k},
+      history_(k, 0) {
+  ;
+};
 
 auto ShardingLRUKReplacer::LRUKNode::RecordTime(std::uint64_t time) -> std::uint64_t {
   history_[visit_counter_ % history_.size()] = time;
@@ -226,7 +233,6 @@ auto ShardingLRUKReplacer::LRUKNode::RecordTime(std::uint64_t time) -> std::uint
 }
 
 void ShardingLRUKReplacer::LRUKNode::ResetHistory() {
-  BUSTUB_ASSERT(GetPinCnt() == 1, "Unexpected.");
   history_[0] = 0;
   visit_counter_ = 0;
 }
@@ -357,7 +363,7 @@ ShardingLRUKReplacer::ShardingLRUKReplacer(size_t num_frames, size_t k)
     : max_size_{num_frames}, k_(k), table_(std::max(1, static_cast<int>(num_frames / MAX_FRAME_PER_SHARD))) {
   BUSTUB_ASSERT(num_frames < std::numeric_limits<frame_id_t>::max(), "Invalid args.");
   for (std::size_t i = 0; i < num_frames; i++) {
-    nodes_.emplace_back(static_cast<frame_id_t>(i), k);
+    nodes_.emplace_back(static_cast<frame_id_t>(i), k_);
   }
   for (frame_id_t i = 0; i < static_cast<frame_id_t>(num_frames); i++) {
     auto to_shard{table_.VisitShard(i)};

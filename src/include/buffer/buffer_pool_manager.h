@@ -78,7 +78,7 @@ class FrameHeader {
   void Reset();
 
   /** @brief The frame ID / index of the frame this header represents. */
-  const frame_id_t frame_id_;
+  const frame_id_t frame_id_{INVALID_FRAME_ID};
 
   /** @brief The readers / writer latch for this frame.
    *
@@ -90,6 +90,11 @@ class FrameHeader {
    *
    */
   std::shared_mutex rwlatch_;
+
+  /**
+   * 当前负载的 page.
+   */
+  page_id_t page_id_{INVALID_PAGE_ID};
 
   /** @brief The dirty flag.
    *
@@ -106,28 +111,6 @@ class FrameHeader {
    * memory frame 的实际数据
    */
   std::vector<char> data_;
-
-  /**
-   * TODO(P1): You may add any fields or helper functions under here that you think are necessary.
-   *
-   * One potential optimization you could make is storing an optional page ID of the page that the `FrameHeader` is
-   * currently storing. This might allow you to skip searching for the corresponding (page ID, frame ID) pair somewhere
-   * else in the buffer pool manager...
-   *
-   * 当前 frame 存储的数据所属的 disk page.
-   * 主要用于通过 frame 反查 page, 以便维护 BufferPoolManager 中的 `page_table_`.
-   * 注意, page_id_ 为 0 时可能有效或无效,
-   * 只有 `page_table_` 能通过 page id 0 映射到此 frame 才说明有效.
-   */
-  page_id_t page_id_{INVALID_PAGE_ID};
-
-  /** @brief The number of pins on this frame keeping the page in memory.
-   *
-   * 注意, `pin_count_` 必须和 replacer_ `SetEvictable` 完全同步,
-   * 且必须用 `bpm_latch_` 保护原子操作,
-   * 用 frame `rwlatch_` 会导致需要检查 `pin_count_` 时重复上锁死锁.
-   */
-  alignas(simple_cu::utils::CACHELINE_SIZE) size_t pin_count_{};
 };
 
 /**
@@ -170,8 +153,6 @@ class BufferPoolManager {
 
   auto GetPinCount(page_id_t page_id) -> std::optional<size_t>;
 
-  void SetCallbackOnDestroyUnsafe(const std::function<void()> &func);
-
  private:
   void FetchPageUnsafe(page_id_t page_id, char *dst);
   void FlushPageUnsafe(page_id_t page_id, char *src);
@@ -179,20 +160,16 @@ class BufferPoolManager {
   void FetchPageAsyncUnsafe(page_id_t page_id, char *dst);
   void FlushPageAsyncUnsafe(page_id_t page_id, char *src);
 
-  auto TryAllocateFrameUnsafe(frame_id_t &frame_id) -> bool;
-  auto TryCommitFrameUnsafe(frame_id_t &expected_frame_id, frame_id_t desired_frame_id, page_id_t page_id) -> bool;
-  auto FindFrameUnsafe(page_id_t page_id) -> frame_id_t;
-
  private:
   /** @brief The number of frames in the buffer pool.
    *
    * 构造时决定, 实际大小取决于 memory 大小.
    */
-  const size_t num_frames_;
+  const size_t num_frames_{};
 
   /** @brief The next page ID to be allocated.  */
   // std::atomic<page_id_t> next_page_id_{};
-  std::atomic<page_id_t> next_page_id_;
+  std::atomic<page_id_t> next_page_id_{};
 
   /**
    * @brief The latch protecting the buffer pool's inner data structures.
@@ -206,7 +183,7 @@ class BufferPoolManager {
    *
    * TODO(P1) We recommend replacing this comment with details about what this latch actually protects.
    */
-  std::shared_ptr<std::shared_mutex> bpm_latch_;
+  // std::shared_ptr<std::shared_mutex> bpm_latch_;
 
   /** @brief The frame headers of the frames that this buffer pool manages.
    *
@@ -216,7 +193,8 @@ class BufferPoolManager {
    *
    * thread-safe.
    */
-  std::vector<std::shared_ptr<FrameHeader>> frames_;
+  // std::vector<std::shared_ptr<FrameHeader>> frames_;
+  std::vector<std::unique_ptr<FrameHeader>> frames_;
 
   /** @brief The page table that keeps track of the mapping between pages and buffer pool frames.
    *
@@ -225,29 +203,27 @@ class BufferPoolManager {
    *
    * NOT thread-safe.
    */
-  std::unordered_map<page_id_t, frame_id_t> page_table_;
+  // std::unordered_map<page_id_t, frame_id_t> page_table_;
 
-  /** @brief A list of free frames that do not hold any page's data.
-   *
-   * 所有可用的空 frame.
-   * 如果此 list 为空, 则需要 replacer 淘汰 page 并复用 frame.
-   *
-   * NOT thread-safe.
-   */
-  std::vector<frame_id_t> free_frames_;
+  struct PageTable {
+    struct alignas(simple_cu::utils::CACHELINE_SIZE) PageTableShard {
+      std::mutex m_;
+      std::unordered_map<page_id_t, frame_id_t> map_;
+    };
+    std::vector<PageTableShard> shards_;
+
+    constexpr static std::size_t SHARD_FACTOR{2};
+
+    PageTable();
+    auto VisitShard(page_id_t page_id) -> PageTableShard *;
+  } page_table_;
 
   /** @brief The replacer to find unpinned / candidate pages for eviction.
    *
    * 负责维护 page 访问事件, 并用于 page evict 的 replacer.
-   *
-   * 注意每次 `Evict`, 被驱逐的 page 对应的 frame 应该被写盘.
-   * 注意所有 frame 默认是不可驱逐的, 需要在合适的时机手动调整.
-   *
-   * 调用 `SetEvictable` 必须 lock `bpm_latch_` 来保证条件检查有效.
-   *
-   * thread-safe.
    */
-  std::shared_ptr<LRUKReplacer> replacer_;
+  // std::shared_ptr<ShardingLRUKReplacer> replacer_;
+  std::unique_ptr<ShardingLRUKReplacer> replacer_;
 
   /** @brief A pointer to the disk scheduler. */
   std::unique_ptr<DiskScheduler> disk_scheduler_;
@@ -257,16 +233,6 @@ class BufferPoolManager {
    *
    * Note: Please ignore this for P1.
    */
-  LogManager *log_manager_ __attribute__((__unused__));
-
-  /**
-   * TODO(P1): You may add additional private members and helper functions if you find them necessary.
-   *
-   * There will likely be a lot of code duplication between the different modes of accessing a page.
-   *
-   * We would recommend implementing a helper function that returns the ID of a frame that is free and has nothing
-   * stored inside of it. Additionally, you may also want to implement a helper function that returns either a shared
-   * pointer to a `FrameHeader` that already has a page's data stored inside of it, or an index to said `FrameHeader`.
-   */
+  [[maybe_unused]] LogManager *log_manager_{};
 };
 }  // namespace bustub

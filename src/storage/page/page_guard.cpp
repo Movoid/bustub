@@ -39,27 +39,8 @@ namespace bustub {
  * @param replacer A shared pointer to the buffer pool manager's replacer.
  * @param bpm_latch A shared pointer to the buffer pool manager's latch.
  */
-ReadPageGuard::ReadPageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> frame,
-                             std::shared_ptr<LRUKReplacer> replacer, std::shared_ptr<std::shared_mutex> bpm_latch)
-    : page_id_(page_id),
-      frame_(std::move(frame)),
-      replacer_(std::move(replacer)),
-      bpm_latch_(std::move(bpm_latch)),
-      lock_holder_(frame_->rwlatch_) {
-  // UNIMPLEMENTED("TODO(P1): Add implementation.");
-  // {
-  //   std::lock_guard<std::shared_mutex> frame_guard{frame_->rwlatch_};
-  //   replacer_->RecordAccess(frame_->frame_id_);
-  //   if (frame_->pin_count_.fetch_add(1, std::memory_order_relaxed) == 0) {
-  //     replacer_->SetEvictable(frame_->frame_id_, false);
-  //   }
-  // }
-  // frame_->rwlatch_.lock_shared();
-  // {
-  // std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
-  // replacer_->RecordAccess(frame_->frame_id_);
-  // }
-  replacer_->RecordAccess(frame_->frame_id_);
+ReadPageGuard::ReadPageGuard(page_id_t page_id, FrameHeader *frame, ShardingLRUKReplacer *replacer)
+    : page_id_(page_id), frame_(frame), replacer_(replacer), lock_holder_(frame_->rwlatch_) {
   is_valid_ = true;
 }
 
@@ -85,9 +66,8 @@ ReadPageGuard::ReadPageGuard(ReadPageGuard &&that) noexcept {
     return;
   }
   page_id_ = that.page_id_;
-  frame_ = std::move(that.frame_);
-  replacer_ = std::move(that.replacer_);
-  bpm_latch_ = std::move(that.bpm_latch_);
+  frame_ = that.frame_;
+  replacer_ = that.replacer_;
   is_valid_ = that.is_valid_;
   lock_holder_ = std::move(that.lock_holder_);
   that.is_valid_ = false;
@@ -116,9 +96,8 @@ auto ReadPageGuard::operator=(ReadPageGuard &&that) noexcept -> ReadPageGuard & 
   }
   Drop();
   page_id_ = that.page_id_;
-  frame_ = std::move(that.frame_);
-  replacer_ = std::move(that.replacer_);
-  bpm_latch_ = std::move(that.bpm_latch_);
+  frame_ = that.frame_;
+  replacer_ = that.replacer_;
   is_valid_ = that.is_valid_;
   lock_holder_ = std::move(that.lock_holder_);
   that.is_valid_ = false;
@@ -165,32 +144,16 @@ auto ReadPageGuard::IsDirty() const -> bool {
  * TODO(P1): Add implementation.
  */
 void ReadPageGuard::Drop() {
-  // UNIMPLEMENTED("TODO(P1): Add implementation.");
-
-  // DebugLog("Call\t\t Reader Drop of page {}", page_id_);
-
   if (!is_valid_) {
-    // DebugLog("Failed\t\t Reader Drop of page {} : {}", page_id_, "Invalid.");
     return;
   }
-  // DebugLog("OK\t\t Reader Drop of page {}", page_id_);
-
+  frame_id_t frame_id{frame_->frame_id_};
   /**
-   * 此处先 unlock frame lk, 再 unpin.
-   * 意味着即使拿到 frame lk, 也可能有 pin.
+   * 在 `Unpin` 之前 unlock frame, 让状态更简单.
+   * 在 `pin_cnt_ == 0` 时一定没有人持有 frame 锁.
    */
   lock_holder_.unlock();
-  {
-    std::lock_guard<std::shared_mutex> bpm_guard{*bpm_latch_};
-    // if (frame_->pin_count_.fetch_sub(1, std::memory_order_relaxed) == 1) {
-    //   // 注意此处可能的 Race: 另一个线程访问此 frame, 并设置 false evictable.
-    //   // 通过 `bpm_latch_` 阻止.
-    //   replacer_->SetEvictable(frame_->frame_id_, true);
-    // }
-    if (frame_->pin_count_-- == 1) {
-      replacer_->SetEvictable(frame_->frame_id_, true);
-    }
-  }
+  replacer_->Unpin(frame_id);
   is_valid_ = false;
 }
 
@@ -213,24 +176,8 @@ ReadPageGuard::~ReadPageGuard() { Drop(); }
  * @param replacer A shared pointer to the buffer pool manager's replacer.
  * @param bpm_latch A shared pointer to the buffer pool manager's latch.
  */
-WritePageGuard::WritePageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> frame,
-                               std::shared_ptr<LRUKReplacer> replacer, std::shared_ptr<std::shared_mutex> bpm_latch)
-    : page_id_(page_id),
-      frame_(std::move(frame)),
-      replacer_(std::move(replacer)),
-      bpm_latch_(std::move(bpm_latch)),
-      lock_holder_(frame_->rwlatch_) {
-  // UNIMPLEMENTED("TODO(P1): Add implementation.");
-  // frame_->rwlatch_.lock();
-  // replacer_->RecordAccess(frame_->frame_id_);
-  // if (frame_->pin_count_.fetch_add(1, std::memory_order_relaxed) == 0) {
-  //   replacer_->SetEvictable(frame_->frame_id_, false);
-  // }
-  // {
-  //   std::lock_guard<std::mutex> bpm_guard{*bpm_latch_};
-  //   replacer_->RecordAccess(frame_->frame_id_);
-  // }
-  replacer_->RecordAccess(frame_->frame_id_);
+WritePageGuard::WritePageGuard(page_id_t page_id, FrameHeader *frame, ShardingLRUKReplacer *replacer)
+    : page_id_(page_id), frame_(frame), replacer_(replacer), lock_holder_(frame_->rwlatch_) {
   is_valid_ = true;
 }
 
@@ -254,9 +201,8 @@ WritePageGuard::WritePageGuard(WritePageGuard &&that) noexcept {
     return;
   }
   page_id_ = that.page_id_;
-  frame_ = std::move(that.frame_);
-  replacer_ = std::move(that.replacer_);
-  bpm_latch_ = std::move(that.bpm_latch_);
+  frame_ = that.frame_;
+  replacer_ = that.replacer_;
   is_valid_ = that.is_valid_;
   that.is_valid_ = false;
   lock_holder_ = std::move(that.lock_holder_);
@@ -285,9 +231,8 @@ auto WritePageGuard::operator=(WritePageGuard &&that) noexcept -> WritePageGuard
   }
   Drop();
   page_id_ = that.page_id_;
-  frame_ = std::move(that.frame_);
-  replacer_ = std::move(that.replacer_);
-  bpm_latch_ = std::move(that.bpm_latch_);
+  frame_ = that.frame_;
+  replacer_ = that.replacer_;
   is_valid_ = that.is_valid_;
   that.is_valid_ = false;
   lock_holder_ = std::move(that.lock_holder_);
@@ -343,26 +288,12 @@ auto WritePageGuard::IsDirty() const -> bool {
  * `Drop` 应该释放锁, 允许上层手动调用 `Drop`.
  */
 void WritePageGuard::Drop() {
-  // UNIMPLEMENTED("TODO(P1): Add implementation.");
-
-  // DebugLog("Call\t\t Writer Drop of page {}", page_id_);
-
   if (!is_valid_) {
-    // DebugLog("Failed\t\t Writer Drop of page {} : {}", page_id_, "Invalid.");
-
     return;
   }
-  // DebugLog("OK\t\t Writer Drop of page {}", page_id_);
+  frame_id_t frame_id{frame_->frame_id_};
   lock_holder_.unlock();
-  {
-    std::lock_guard<std::shared_mutex> bpm_guard{*bpm_latch_};
-    // if (frame_->pin_count_.fetch_sub(1, std::memory_order_relaxed) == 1) {
-    //   replacer_->SetEvictable(frame_->frame_id_, true);
-    // }
-    if (frame_->pin_count_-- == 1) {
-      replacer_->SetEvictable(frame_->frame_id_, true);
-    }
-  }
+  replacer_->Unpin(frame_id);
 
   is_valid_ = false;
 }
