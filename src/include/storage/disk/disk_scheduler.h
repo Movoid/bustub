@@ -521,7 +521,7 @@ class QSBRGuard {
   ~QSBRGuard() {
     if (mgr_) {
       mgr_->ExitCriticalZone();
-      if (mgr_->GetRetiredCntLocal() > 32) {
+      if (mgr_->GetRetiredCntLocal() > 0) {
         mgr_->ReclaimLocal();
       }
     }
