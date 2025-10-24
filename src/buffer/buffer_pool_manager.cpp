@@ -306,7 +306,7 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
     }
 
     if (frame_id != INVALID_FRAME_ID) {
-      return WritePageGuard{page_id, frames_[frame_id].get(), replacer_.get()};
+      return WritePageGuard{page_id, frames_[frame_id], replacer_};
     }
 
     /**
@@ -397,7 +397,7 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
       to_evicted_frame->page_id_ = page_id;
     }
 
-    return WritePageGuard{page_id, frames_[evicted_frame_id].get(), replacer_.get()};
+    return WritePageGuard{page_id, frames_[evicted_frame_id], replacer_};
   }
 }
 
@@ -445,7 +445,7 @@ auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_typ
     }
 
     if (frame_id != INVALID_FRAME_ID) {
-      return ReadPageGuard{page_id, frames_[frame_id].get(), replacer_.get()};
+      return ReadPageGuard{page_id, frames_[frame_id], replacer_};
     }
 
     /**
@@ -536,7 +536,7 @@ auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_typ
       to_evicted_frame->page_id_ = page_id;
     }
 
-    return ReadPageGuard{page_id, frames_[evicted_frame_id].get(), replacer_.get()};
+    return ReadPageGuard{page_id, frames_[evicted_frame_id], replacer_};
   }
 }
 

@@ -70,7 +70,8 @@ class ReadPageGuard {
 
  private:
   /** @brief Only the buffer pool manager is allowed to construct a valid `ReadPageGuard.` */
-  explicit ReadPageGuard(page_id_t page_id, FrameHeader *frame, ShardingLRUKReplacer *replacer);
+  explicit ReadPageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> frame,
+                         std::shared_ptr<ShardingLRUKReplacer> replacer);
 
   /** @brief The page ID of the page we are guarding. */
   page_id_t page_id_;
@@ -80,7 +81,7 @@ class ReadPageGuard {
    *
    * Almost all operations of this page guard should be done via this shared pointer to a `FrameHeader`.
    */
-  FrameHeader *frame_;
+  std::shared_ptr<FrameHeader> frame_;
 
   /**
    * @brief A shared pointer to the buffer pool's replacer.
@@ -88,7 +89,7 @@ class ReadPageGuard {
    * Since the buffer pool cannot know when this `ReadPageGuard` gets destructed, we maintain a pointer to the buffer
    * pool's replacer in order to set the frame as evictable on destruction.
    */
-  ShardingLRUKReplacer *replacer_;
+  std::shared_ptr<ShardingLRUKReplacer> replacer_;
 
   // /**
   //  * @brief A shared pointer to the buffer pool's latch.
@@ -170,7 +171,8 @@ class WritePageGuard {
 
  private:
   /** @brief Only the buffer pool manager is allowed to construct a valid `WritePageGuard.` */
-  explicit WritePageGuard(page_id_t page_id, FrameHeader *frame, ShardingLRUKReplacer *replacer);
+  explicit WritePageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> frame,
+                          std::shared_ptr<ShardingLRUKReplacer> replacer);
 
   /** @brief The page ID of the page we are guarding. */
   page_id_t page_id_;
@@ -180,7 +182,7 @@ class WritePageGuard {
    *
    * Almost all operations of this page guard should be done via this shared pointer to a `FrameHeader`.
    */
-  FrameHeader *frame_;
+  std::shared_ptr<FrameHeader> frame_;
 
   /**
    * @brief A shared pointer to the buffer pool's replacer.
@@ -188,7 +190,7 @@ class WritePageGuard {
    * Since the buffer pool cannot know when this `WritePageGuard` gets destructed, we maintain a pointer to the buffer
    * pool's replacer in order to set the frame as evictable on destruction.
    */
-  ShardingLRUKReplacer *replacer_;
+  std::shared_ptr<ShardingLRUKReplacer> replacer_;
 
   // /**
   //  * @brief A shared pointer to the buffer pool's latch.

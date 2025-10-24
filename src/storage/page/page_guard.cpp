@@ -39,8 +39,9 @@ namespace bustub {
  * @param replacer A shared pointer to the buffer pool manager's replacer.
  * @param bpm_latch A shared pointer to the buffer pool manager's latch.
  */
-ReadPageGuard::ReadPageGuard(page_id_t page_id, FrameHeader *frame, ShardingLRUKReplacer *replacer)
-    : page_id_(page_id), frame_(frame), replacer_(replacer), lock_holder_(frame_->rwlatch_) {
+ReadPageGuard::ReadPageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> frame,
+                             std::shared_ptr<ShardingLRUKReplacer> replacer)
+    : page_id_(page_id), frame_(std::move(frame)), replacer_(std::move(replacer)), lock_holder_(frame_->rwlatch_) {
   is_valid_ = true;
 }
 
@@ -147,13 +148,12 @@ void ReadPageGuard::Drop() {
   if (!is_valid_) {
     return;
   }
-  frame_id_t frame_id{frame_->frame_id_};
   /**
    * 在 `Unpin` 之前 unlock frame, 让状态更简单.
    * 在 `pin_cnt_ == 0` 时一定没有人持有 frame 锁.
    */
   lock_holder_.unlock();
-  replacer_->Unpin(frame_id);
+  replacer_->Unpin(frame_->frame_id_);
   is_valid_ = false;
 }
 
@@ -176,8 +176,9 @@ ReadPageGuard::~ReadPageGuard() { Drop(); }
  * @param replacer A shared pointer to the buffer pool manager's replacer.
  * @param bpm_latch A shared pointer to the buffer pool manager's latch.
  */
-WritePageGuard::WritePageGuard(page_id_t page_id, FrameHeader *frame, ShardingLRUKReplacer *replacer)
-    : page_id_(page_id), frame_(frame), replacer_(replacer), lock_holder_(frame_->rwlatch_) {
+WritePageGuard::WritePageGuard(page_id_t page_id, std::shared_ptr<FrameHeader> frame,
+                               std::shared_ptr<ShardingLRUKReplacer> replacer)
+    : page_id_(page_id), frame_(std::move(frame)), replacer_(std::move(replacer)), lock_holder_(frame_->rwlatch_) {
   is_valid_ = true;
 }
 

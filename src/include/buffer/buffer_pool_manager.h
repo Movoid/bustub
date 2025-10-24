@@ -168,42 +168,14 @@ class BufferPoolManager {
   const size_t num_frames_{};
 
   /** @brief The next page ID to be allocated.  */
-  // std::atomic<page_id_t> next_page_id_{};
   std::atomic<page_id_t> next_page_id_{};
-
-  /**
-   * @brief The latch protecting the buffer pool's inner data structures.
-   *
-   * BufferPool Manager Latch,
-   * 在读写 BufferPoolManager 内
-   * `page_table_`, `free_frames_`, `replacer_`(逻辑需要)
-   * 时上锁.
-   *
-   * 读写 FrameHeader 中的 `page_id_` 使用此锁.
-   *
-   * TODO(P1) We recommend replacing this comment with details about what this latch actually protects.
-   */
-  // std::shared_ptr<std::shared_mutex> bpm_latch_;
 
   /** @brief The frame headers of the frames that this buffer pool manages.
    *
    * 维护所有的 frame.
-   * 在 BufferPoolManager 构造后不会修改,
-   * 访问 FrameHeader `data_` 等需要对 `rwlatch_` 上锁.
-   *
-   * thread-safe.
+   * 在 BufferPoolManager 构造后不会修改.
    */
-  // std::vector<std::shared_ptr<FrameHeader>> frames_;
-  std::vector<std::unique_ptr<FrameHeader>> frames_;
-
-  /** @brief The page table that keeps track of the mapping between pages and buffer pool frames.
-   *
-   * 维护每个 page 所在的 frame id.
-   * 所有对 page 的 R/W 都需要经过 `page_table_` 寻址到 frame.
-   *
-   * NOT thread-safe.
-   */
-  // std::unordered_map<page_id_t, frame_id_t> page_table_;
+  std::vector<std::shared_ptr<FrameHeader>> frames_;
 
   struct PageTable {
     struct alignas(simple_cu::utils::CACHELINE_SIZE) PageTableShard {
@@ -222,8 +194,7 @@ class BufferPoolManager {
    *
    * 负责维护 page 访问事件, 并用于 page evict 的 replacer.
    */
-  // std::shared_ptr<ShardingLRUKReplacer> replacer_;
-  std::unique_ptr<ShardingLRUKReplacer> replacer_;
+  std::shared_ptr<ShardingLRUKReplacer> replacer_;
 
   /** @brief A pointer to the disk scheduler. */
   std::unique_ptr<DiskScheduler> disk_scheduler_;
