@@ -461,14 +461,14 @@ auto ShardingLRUKReplacer::SelectEvictAndPin() -> std::optional<frame_id_t> {
 auto ShardingLRUKReplacer::TryCommitEvict(frame_id_t frame_id) -> bool {
   auto to_shard{table_.VisitShard(frame_id)};
   auto to_node{&nodes_[frame_id]};
-  BUSTUB_ASSERT(!to_shard->cold_heap_.Contains(to_node), "Unexpected.");
-  BUSTUB_ASSERT(!to_shard->hot_heap_.Contains(to_node), "Unexpected.");
   /**
    * lock 是必要的.
    * LRUKNode 的 `pin_cnt_` 变化应该和 ReplacerShard 的 Heap 变化是原子的.
    */
   {
     std::lock_guard lk{to_shard->m_};
+    BUSTUB_ASSERT(!to_shard->cold_heap_.Contains(to_node), "Unexpected.");
+    BUSTUB_ASSERT(!to_shard->hot_heap_.Contains(to_node), "Unexpected.");
     if (to_node->GetPinCnt() > 1) {
       to_node->Unpin();
       return false;
