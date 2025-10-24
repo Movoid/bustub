@@ -77,9 +77,6 @@ class FrameHeader {
   auto GetDataMut() -> char *;
   void Reset();
 
-  /** @brief The frame ID / index of the frame this header represents. */
-  const frame_id_t frame_id_{INVALID_FRAME_ID};
-
   /** @brief The readers / writer latch for this frame.
    *
    * 对 frame 加锁, 在 PageGuard 构造时, 就应该上锁,
@@ -92,6 +89,18 @@ class FrameHeader {
   std::shared_mutex rwlatch_;
 
   /**
+   * @brief A pointer to the data of the page that this frame holds.
+   *
+   * If the frame does not hold any page data, the frame contains all null bytes.
+   *
+   * memory frame 的实际数据
+   */
+  std::vector<char> data_;
+
+  /** @brief The frame ID / index of the frame this header represents. */
+  const frame_id_t frame_id_{INVALID_FRAME_ID};
+
+  /**
    * 当前负载的 page.
    */
   page_id_t page_id_{INVALID_PAGE_ID};
@@ -102,15 +111,6 @@ class FrameHeader {
    *
    */
   bool is_dirty_{};
-
-  /**
-   * @brief A pointer to the data of the page that this frame holds.
-   *
-   * If the frame does not hold any page data, the frame contains all null bytes.
-   *
-   * memory frame 的实际数据
-   */
-  std::vector<char> data_;
 };
 
 /**

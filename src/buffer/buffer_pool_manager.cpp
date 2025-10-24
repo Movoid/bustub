@@ -31,7 +31,7 @@ namespace bustub {
  *
  * @param frame_id The frame ID / index of the frame we are creating a header for.
  */
-FrameHeader::FrameHeader(frame_id_t frame_id) : frame_id_(frame_id), data_(BUSTUB_PAGE_SIZE, 0) { Reset(); }
+FrameHeader::FrameHeader(frame_id_t frame_id) : data_(BUSTUB_PAGE_SIZE, 0), frame_id_(frame_id) { Reset(); }
 
 /**
  * @brief Get a raw const pointer to the frame's data.
