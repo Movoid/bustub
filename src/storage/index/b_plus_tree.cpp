@@ -12,6 +12,7 @@
 
 #include "storage/index/b_plus_tree.h"
 #include "storage/index/b_plus_tree_debug.h"
+#include "storage/page/b_plus_tree_header_page.h"
 
 // #define CUSTOM_LOG
 // #include "common/custom_debug.h"
@@ -42,7 +43,12 @@ BPLUSTREE_TYPE::BPlusTree(std::string name, page_id_t header_page_id, BufferPool
  * 析构函数.
  */
 INDEX_TEMPLATE_ARGUMENTS
-BPLUSTREE_TYPE::~BPlusTree() { BUSTUB_ASSERT(qsbr_mgr_.GetRetiredCntGlobal() == 0, "Unexpected."); }
+BPLUSTREE_TYPE::~BPlusTree() {
+  /**
+   * 不能在此处清理. 此时 BPM 已经被 delete.
+   */
+  BUSTUB_ASSERT(qsbr_mgr_.GetRetiredCntGlobal() == 0, "Unexpected.");
+}
 
 /**
  * @brief Helper function to decide whether current b+tree is empty

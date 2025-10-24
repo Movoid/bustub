@@ -13,8 +13,6 @@
 #pragma once
 
 #include <string>
-#include <utility>
-#include <vector>
 
 #include "storage/page/b_plus_tree_page.h"
 
