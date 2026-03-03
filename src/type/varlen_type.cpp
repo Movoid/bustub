@@ -145,6 +145,18 @@ auto VarlenType::ToString(const Value &val) const -> std::string {
 }
 
 /**
+ * 序列化和反序列化逻辑.
+ *
+ * 序列化操作将 Value 序列化到 `storage` pointer 目标位置.
+ * NULL 数据的 len 是 `BUSTUB_VALUE_NULL`, 其没有数据.
+ * 非 NULL 数据需要先序列化其 `len` 长度, 再序列化其 `len` bytes 实际数据.
+ *
+ * 反序列化操作返回一个 Value object.
+ * NULL 数据的 Value 的 `data` 指针是 `nullptr`, 同时 `manage_data = false`.
+ * 非 NULL 数据的 Value 的 `data` 直接指向数据的起始位置, 不包括 `len`.
+ */
+
+/**
  * Serialize this value into the given storage space
  */
 void VarlenType::SerializeTo(const Value &val, char *storage) const {

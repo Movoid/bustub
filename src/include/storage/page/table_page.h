@@ -77,7 +77,22 @@ class TablePage {
   static_assert(sizeof(page_id_t) == 4);
 
  private:
+  /**
+   * Slotted-Page Structure,
+   * Page 前部分的 TupleInfo 指向 Page 尾部的 Tuple.
+   * 记录 Page 内 Offset, Size, Write-TImestamp.
+   *
+   * 注意, Page 不关心 Schema,
+   * 只记录 Tuple 的 Size, 每个 Tuple 都被视作 byte stream.
+   */
   using TupleInfo = std::tuple<uint16_t, uint16_t, TupleMeta>;
+
+  /**
+   * zero length 数组扩展, 不符合 Cpp 标准.
+   * `page_start_`, `tuple_info_` 标记 Page 内两个位置.
+   * 对 `tuple_info_` 越界访问需要手动保证合法.
+   */
+
   char page_start_[0];
   page_id_t next_page_id_;
   uint16_t num_tuples_;

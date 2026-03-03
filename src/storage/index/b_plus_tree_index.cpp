@@ -15,6 +15,8 @@
 namespace bustub {
 /**
  * Constructor
+ *
+ * BPlusTreeIndex 封装了 BPlusTree 的接口.
  */
 INDEX_TEMPLATE_ARGUMENTS
 BPLUSTREE_INDEX_TYPE::BPlusTreeIndex(std::unique_ptr<IndexMetadata> &&metadata, BufferPoolManager *buffer_pool_manager)
@@ -42,6 +44,13 @@ void BPLUSTREE_INDEX_TYPE::DeleteEntry(const Tuple &key, RID rid, Transaction *t
   container_->Remove(index_key);
 }
 
+/**
+ * `key` 只需要直接传递作为 Index Key 的 Column 取值.
+ *
+ * WARNING: `BPlusTree::GetValue()` 的实现只会返回一个 value.
+ * 如果有多个 value 有相同的 key, 必须使用 Iterator 扫描.
+ * bustub Test Cases 承诺不存在多个 Tuple 有相同的 Index Key 取值.
+ */
 INDEX_TEMPLATE_ARGUMENTS
 void BPLUSTREE_INDEX_TYPE::ScanKey(const Tuple &key, std::vector<RID> *result, Transaction *transaction) {
   // construct scan index key

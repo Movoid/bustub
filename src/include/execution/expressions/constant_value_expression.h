@@ -21,6 +21,9 @@
 namespace bustub {
 /**
  * ConstantValueExpression represents constants.
+ *
+ * 直接表示一个常量.
+ * 在 ValuesExecutor 常用, 因为通常用户直接提供常量.
  */
 class ConstantValueExpression : public AbstractExpression {
  public:

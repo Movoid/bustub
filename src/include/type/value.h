@@ -32,6 +32,10 @@ inline auto GetCmpBool(bool boolean) -> CmpBool { return boolean ? CmpBool::CmpT
 // A value is an abstract class that represents a view over SQL data stored in
 // some materialized state. All values have a type and comparison functions, but
 // subclasses implement other type-specific functionality.
+
+/**
+ * 数据的实际存储.
+ */
 class Value {
   // Friend Type classes
   friend class Type;
@@ -48,6 +52,10 @@ class Value {
   friend class VectorType;
 
  public:
+  /**
+   * bustub 中的 NULL Value,
+   * 其有 Type, 但取值为 NULL.
+   */
   explicit Value(const TypeId type) : manage_data_(false), type_id_(type) { size_.len_ = BUSTUB_VALUE_NULL; }
   // BOOLEAN and TINYINT
   Value(TypeId type, int8_t i);
@@ -62,6 +70,11 @@ class Value {
   Value(TypeId type, int64_t i);
   // TIMESTAMP
   Value(TypeId type, uint64_t i);
+
+  /**
+   * 对于 VARCHAR 和 VECTOR, 需要额外提供 pointer.
+   */
+
   // VARCHAR
   Value(TypeId type, const char *data, uint32_t len, bool manage_data);
   Value(TypeId type, const std::string &data);
@@ -148,6 +161,10 @@ class Value {
   // space, or whether we must store only a reference to this value. If inlined
   // is false, we may use the provided data pool to allocate space for this
   // value, storing a reference into the allocated pool space in the storage.
+  /**
+   * 序列化和反序列化在 Type 定义.
+   * 涉及对 inline data 的处理.
+   */
   inline void SerializeTo(char *storage) const { Type::GetInstance(type_id_)->SerializeTo(*this, storage); }
 
   // Deserialize a value of the given type from the given storage space.

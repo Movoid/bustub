@@ -121,6 +121,11 @@ class IndexMetadata {
  * delete, predicate insert, point query, and full index scan. Predicate scan
  * only supports conjunction, and may or may not be optimized depending on
  * the type of expressions inside the predicate.
+ *
+ * 一个接口 Base Class.
+ * BPlusTreeIndex 是其一种实现, 封装 BPlusTree 并提供了 Index 接口.
+ *
+ * 允许使用 key 查找 RID.
  */
 class Index {
  public:
@@ -144,7 +149,12 @@ class Index {
   /** @return The index key schema */
   auto GetKeySchema() const -> Schema * { return metadata_->GetKeySchema(); }
 
-  /** @return The index key attributes */
+  /**
+   * @return The index key attributes
+   *
+   * 记录当前 Index 的 Schema 中的 Column 在原始 Table Schema 中的下标.
+   * 配合 `Tuple::KeyFromTuple()` 使用.
+   */
   auto GetKeyAttrs() const -> const std::vector<uint32_t> & { return metadata_->GetKeyAttrs(); }
 
   /** @return A string representation for debugging */

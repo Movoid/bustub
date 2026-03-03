@@ -21,7 +21,14 @@ namespace bustub {
 
 class Value;
 
+// NOLINTNEXTLINE
 enum class CmpBool { CmpFalse = 0, CmpTrue = 1, CmpNull = 2 };
+
+/**
+ * 对数据类型的抽象。
+ * bustub 将一个数据的类型和实际存储拆分为 Type 和 Value .
+ * Type 系列 Class 提供了对应类型的可用操作.
+ */
 
 class Type {
  public:
@@ -38,9 +45,9 @@ class Type {
   static auto GetMinValue(TypeId type_id) -> Value;
   static auto GetMaxValue(TypeId type_id) -> Value;
 
-  inline static auto GetInstance(TypeId type_id) -> Type * { return k_types[type_id]; }
+  static auto GetInstance(TypeId type_id) -> Type * { return k_types[type_id]; }
 
-  inline auto GetTypeId() const -> TypeId { return type_id_; }
+  auto GetTypeId() const -> TypeId { return type_id_; }
 
   // Comparison functions
   //
@@ -105,8 +112,15 @@ class Type {
 
  protected:
   // The actual type ID
+  /**
+   * 具体类型 Class 继承 Type Class 并委托构造 Type 设置自己的 `type_id_`.
+   */
   TypeId type_id_;
+
   // Singleton instances.
+  /**
+   * `static` 全局共享, 进行类似多态的运行时派发.
+   */
   static Type *k_types[10];
 };
 }  // namespace bustub

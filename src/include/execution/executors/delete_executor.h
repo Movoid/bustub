@@ -37,13 +37,17 @@ class DeleteExecutor : public AbstractExecutor {
   auto Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool override;
 
   /** @return The output schema for the delete */
-  auto GetOutputSchema() const -> const Schema & override { return plan_->OutputSchema(); };
+  auto GetOutputSchema() const -> const Schema & override { return to_plan_->OutputSchema(); };
 
  private:
   /** The delete plan node to be executed */
-  const DeletePlanNode *plan_;
+  const DeletePlanNode *to_plan_;
 
   /** The child executor from which RIDs for deleted tuples are pulled */
-  std::unique_ptr<AbstractExecutor> child_executor_;
+  std::unique_ptr<AbstractExecutor> to_child_executor_;
+
+  const TableInfo *to_table_info_{};
+  int32_t deleted_cnt_{};
+  bool is_consumed_{};
 };
 }  // namespace bustub

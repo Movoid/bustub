@@ -22,6 +22,11 @@ namespace bustub {
 
 #define INDEXITERATOR_TYPE IndexIterator<KeyType, ValueType, KeyComparator>
 
+/**
+ * BPlusTreeIndex 的 Iterator.
+ * 这不是基类.
+ */
+
 INDEX_TEMPLATE_ARGUMENTS
 class IndexIterator {
   using InternalPageValueType = page_id_t;
@@ -30,6 +35,7 @@ class IndexIterator {
  public:
   // you may define your own constructor based on your member variables
   ~IndexIterator();  // NOLINT
+  IndexIterator(IndexIterator &&that) noexcept;
 
   explicit IndexIterator(ReadPageGuard &&guard, int offset, BufferPoolManager *bpm)
       : page_g_opt_{std::move(guard)}, offset_{offset}, bpm_{bpm} {}

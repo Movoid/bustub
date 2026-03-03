@@ -26,6 +26,11 @@
 
 namespace bustub {
 
+/**
+ * 一个派发表.
+ * 用于选择类型调用其 override 函数.
+ */
+
 Type *Type::k_types[] = {new Type(TypeId::INVALID),
                          new BooleanType(),
                          new TinyintType(),
@@ -186,6 +191,11 @@ auto Type::GetMaxValue(TypeId type_id) -> Value {
   }
   throw Exception(ExceptionType::MISMATCH_TYPE, "Cannot get max value.");
 }
+
+/**
+ * Type Class 不提供这些操作.
+ * 其子类实现具体操作.
+ */
 
 auto Type::CompareEquals(const Value &left __attribute__((unused)), const Value &right __attribute__((unused))) const
     -> CmpBool {

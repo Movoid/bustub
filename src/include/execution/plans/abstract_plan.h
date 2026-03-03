@@ -61,6 +61,8 @@ using AbstractPlanNodeRef = std::shared_ptr<const AbstractPlanNode>;
  * Plan nodes are modeled as trees, so each plan node can have a variable number of children.
  * Per the Volcano model, the plan node receives the tuples of its children.
  * The ordering of the children may matter.
+ *
+ * Plan 描述输出的 Schema.
  */
 class AbstractPlanNode {
  public:

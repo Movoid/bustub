@@ -91,6 +91,8 @@ class ExecutionEngine {
    * @param executor The root executor
    * @param plan The plan to execute
    * @param result_set The tuple result set
+   *
+   * 调用根 Executor 并收集结果.
    */
   static void PollExecutor(AbstractExecutor *executor, const AbstractPlanNodeRef &plan,
                            std::vector<Tuple> *result_set) {

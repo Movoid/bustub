@@ -26,10 +26,23 @@ namespace bustub {
 class Schema;
 using SchemaRef = std::shared_ptr<const Schema>;
 
+/**
+ * Schema 描述如何解释一个 Tuple.
+ *
+ * Schema 收集 Column,
+ * 并在 Schema 构造时, `uninlined_columns_` 记录那些要求 uninline 存储的 Column.
+ *
+ * 是否 inline 存储取决于 Column::IsInlined() .
+ */
+
 class Schema {
  public:
   explicit Schema(const std::vector<Column> &columns);
 
+  /**
+   * static 接口, 使用 `attrs` 中指明的 Column index,
+   * 获取 `from` Schema 中对应的 Column 来构造新的 Schema.
+   */
   static auto CopySchema(const Schema *from, const std::vector<uint32_t> &attrs) -> Schema {
     std::vector<Column> cols;
     cols.reserve(attrs.size());
@@ -86,22 +99,37 @@ class Schema {
   /** @return the number of non-inlined columns */
   auto GetUnlinedColumnCount() const -> uint32_t { return static_cast<uint32_t>(uninlined_columns_.size()); }
 
-  /** @return the number of bytes used by one tuple */
+  /**
+   * @return the number of bytes used by one tuple
+   *
+   * `length_` 不包括 uninline 实际数据长度.
+   */
   inline auto GetInlinedStorageSize() const -> uint32_t { return length_; }
 
-  /** @return true if all columns are inlined, false otherwise */
+  /**
+   * @return true if all columns are inlined, false otherwise
+   *
+   * 只有 Schema 的所有 Column 都是 inline,
+   * Schema 才是 inline.
+   */
   inline auto IsInlined() const -> bool { return tuple_is_inlined_; }
 
   auto ToString(bool simplified = true) const -> std::string;
 
  private:
-  /** Fixed-length column size, i.e. the number of bytes used by one tuple. */
+  /**
+   * Fixed-length column size, i.e. the number of bytes used by one tuple.
+   *
+   * 记录 inline 数据的长度.
+   * 对于 uninline 数据, 其被视为 uint32_t,
+   * 其实际数据不算入 `length_`.
+   */
   uint32_t length_;
 
   /** All the columns in the schema, inlined and uninlined. */
   std::vector<Column> columns_;
 
-  /** True if all the columns are inlined, false otherwise. */
+  /** True if **all** the columns are inlined, false otherwise. */
   bool tuple_is_inlined_{true};
 
   /** Indices of all uninlined columns. */

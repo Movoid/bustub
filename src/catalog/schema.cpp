@@ -32,6 +32,13 @@ Schema::Schema(const std::vector<Column> &columns) {
       uninlined_columns_.push_back(index);
     }
     // set column offset
+    /**
+     * 注意此处对 uninline 数据的处理.
+     * uninline 数据被视为 uint32_t inline 数据.
+     * 实际的 uninline 数据没有被算入 `length_`.
+     *
+     * 同时设置每个 Column 的 `column_offset_`.
+     */
     column.column_offset_ = curr_offset;
     if (column.IsInlined()) {
       curr_offset += column.GetStorageSize();

@@ -98,6 +98,11 @@ auto VectorType::ToString(const Value &val) const -> std::string {
 }
 
 /**
+ * 序列化和反序列化逻辑.
+ * 和 VarlenType 相同.
+ */
+
+/**
  * Serialize this value into the given storage space
  */
 void VectorType::SerializeTo(const Value &val, char *storage) const {

@@ -47,25 +47,41 @@ class IndexScanPlanNode : public AbstractPlanNode {
   /** @return the identifier of the table that should be scanned */
   auto GetIndexOid() const -> index_oid_t { return index_oid_; }
 
+  auto GetTableOid() const -> table_oid_t { return table_oid_; }
+
   BUSTUB_PLAN_NODE_CLONE_WITH_CHILDREN(IndexScanPlanNode);
 
   /** The table which the index is created on. */
   table_oid_t table_oid_;
 
   /** The index whose tuples should be scanned. */
+  /**
+   * IndexScanExecutor 使用此 Index.
+   * 由 Planner 选择使用哪个 Index.
+   */
   index_oid_t index_oid_;
 
   /** The predicate to filter in index scan.
    * For Fall 2023, after you implemented seqscan to indexscan optimizer rule,
    * we can use this predicate to do index point lookup
+   *
+   * 来自谓词下推的谓词.
+   * 记得判空.
+   * 应该在最后阶段使用此谓词过滤.
    */
   AbstractExpressionRef filter_predicate_;
 
   /**
    * The constant value keys to lookup.
    * For example when dealing "WHERE v = 1" we could store the constant value 1 here
+   *
+   * 存放用于定点查找的 ConstantValueExpression.
    */
   std::vector<AbstractExpressionRef> pred_keys_;
+
+  /**
+   * 对于 `where colB > 3` 的谓词, 暂不支持范围扫描.
+   */
 
   // Add anything you want here for index lookup
 

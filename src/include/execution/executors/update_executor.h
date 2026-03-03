@@ -37,16 +37,19 @@ class UpdateExecutor : public AbstractExecutor {
   auto Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool override;
 
   /** @return The output schema for the update */
-  auto GetOutputSchema() const -> const Schema & override { return plan_->OutputSchema(); }
+  auto GetOutputSchema() const -> const Schema & override { return to_plan_->OutputSchema(); }
 
  private:
   /** The update plan node to be executed */
-  const UpdatePlanNode *plan_;
-
-  /** Metadata identifying the table that should be updated */
-  const TableInfo *table_info_;
+  const UpdatePlanNode *to_plan_{};
 
   /** The child executor to obtain value from */
-  std::unique_ptr<AbstractExecutor> child_executor_;
+  std::unique_ptr<AbstractExecutor> to_child_executor_;
+
+  /** Metadata identifying the table that should be updated */
+  const TableInfo *to_table_info_{};
+
+  int32_t updated_cnt_{};
+  bool is_consumed_{};
 };
 }  // namespace bustub

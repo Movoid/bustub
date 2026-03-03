@@ -43,12 +43,24 @@ auto FilterExecutor::Next(Tuple *tuple, RID *rid) -> bool {
 
   while (true) {
     // Get the next tuple
+
+    /**
+     * 先调用子 Executor 获得输入 Tuple.
+     * 返回 `false` 则没有输入.
+     */
     const auto status = child_executor_->Next(tuple, rid);
 
     if (!status) {
       return false;
     }
 
+    /**
+     * 使用 FilterPlanNode 提供的谓词 `filter_expr`,
+     * 其需要非 Null 且为 True 才通过筛选.
+     *
+     * 若 Evaluate 不为 True, 则进行下一次 while 循环, 重新获得新的输入.
+     * 否则 return 离开 while 循环, 并保持 `tuple` 指向当前输入.
+     */
     auto value = filter_expr->Evaluate(tuple, child_executor_->GetOutputSchema());
     if (!value.IsNull() && value.GetAs<bool>()) {
       return true;

@@ -55,29 +55,51 @@ TableHeap::TableHeap(bool create_table_heap) : bpm_(nullptr) {}
 auto TableHeap::InsertTuple(const TupleMeta &meta, const Tuple &tuple, LockManager *lock_mgr, Transaction *txn,
                             table_oid_t oid) -> std::optional<RID> {
   std::unique_lock<std::mutex> guard(latch_);
+
+  /**
+   * 所有插入优先插入到 `last_page_id_`.
+   */
   auto page_guard = bpm_->WritePage(last_page_id_);
 
   while (true) {
     auto page = page_guard.AsMut<TablePage>();
+    /*
+     * 尝试在当前 page 内分配一个 Slot.
+     * 成功则 break.
+     */
     if (page->GetNextTupleOffset(meta, tuple) != std::nullopt) {
       break;
     }
 
     // if there's no tuple in the page, and we can't insert the tuple, then this tuple is too large.
+    /**
+     * 此处, 在 `page` 尝试分配新 Slot 失败.
+     * 若当前 page 实际没有存储任何 Tuple,
+     * 说明当前要插入的 Tuple 甚至大于一整个 page 的可用空间,
+     * 提前 assert 失败.
+     */
     BUSTUB_ENSURE(page->GetNumTuples() != 0, "tuple is too large, cannot insert");
 
+    /**
+     * 因 page 没有足够空间而失败,
+     * 则分配新的 page, 并连接到当前 TablePage 链表中, 当前 page 节点之后.
+     */
     page_id_t next_page_id = bpm_->NewPage();
     page->SetNextPageId(next_page_id);
 
     auto next_page_guard = bpm_->WritePage(next_page_id);
     auto next_page = next_page_guard.AsMut<TablePage>();
     next_page->Init();
+
     last_page_id_ = next_page_id;
 
     page_guard.Drop();
     page_guard = std::move(next_page_guard);
   }
 
+  /**
+   * `last_page_id_` 指向最新的有足够空间的 page.
+   */
   auto last_page_id = last_page_id_;
 
   auto page = page_guard.AsMut<TablePage>();
@@ -102,6 +124,9 @@ auto TableHeap::InsertTuple(const TupleMeta &meta, const Tuple &tuple, LockManag
  * Update the meta of a tuple.
  * @param meta new tuple meta
  * @param rid the rid of the inserted tuple
+ *
+ * TupleMeta 记录一个 Tuple 的 W-Timestamp 和 Tombstone 标记.
+ * 此函数可用于删除一个 Tuple.
  */
 void TableHeap::UpdateTupleMeta(const TupleMeta &meta, RID rid) {
   auto page_guard = bpm_->WritePage(rid.GetPageId());
@@ -139,7 +164,12 @@ auto TableHeap::GetTupleMeta(RID rid) -> TupleMeta {
  * use this function for project 3. Given that you have already implemented your project 4 update executor as a
  * pipeline breaker, you may use `MakeEagerIterator` to test whether the update executor is implemented correctly.
  * There should be no difference between this function and `MakeEagerIterator` in project 4 if everything is
- * implemented correctly. */
+ * implemented correctly.
+ *
+ * 注意此处的 Iterator 额外记录了 `last_page_id` 及其 page 内的 slot 数量 `num_tuples`.
+ * 这意味着在 Iterator 构造完成后再插入新的 Tuple,
+ * 由于新的 Tuple 总在 `last_page_id` 之后, 不会被 Iterator 访问.
+ */
 auto TableHeap::MakeIterator() -> TableIterator {
   std::unique_lock<std::mutex> guard(latch_);
   auto last_page_id = last_page_id_;

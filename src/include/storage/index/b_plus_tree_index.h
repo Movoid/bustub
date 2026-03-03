@@ -25,6 +25,13 @@ namespace bustub {
 
 #define BPLUSTREE_INDEX_TYPE BPlusTreeIndex<KeyType, ValueType, KeyComparator>
 
+/**
+ * Index 的一种子类实现.
+ * 使用 BPlusTRee 作为底层并封装 Tuple 接口.
+ *
+ * 使用 `BPlusTreeIndex::GetBeginIterator()` 来进行顺序扫描.
+ */
+
 INDEX_TEMPLATE_ARGUMENTS
 class BPlusTreeIndex : public Index {
  public:
@@ -50,6 +57,17 @@ class BPlusTreeIndex : public Index {
 };
 
 /** We only support index table with one integer key for now in BusTub. Hardcode everything here. */
+
+/**
+ * bustub 只支持 8 bytes 作为 key 的索引,
+ * 即 BPlusTreeIndexForTwoIntegerColumn 类型.
+ *
+ * 由于 Index 基类没有提供 MakeIterator 接口,
+ * 不得不将 Index 全部 dynamic_cast 到 BPlusTreeIndexForTwoIntegerColumn 类型.
+ *
+ * 就算使用 IndexIterator 基类并让 Index 基类提供此接口,
+ * 不同的 Iterator 也有有序无序的区别.
+ */
 
 constexpr static const auto TWO_INTEGER_SIZE_B_TREE = 8;
 using IntegerKeyType_BTree = GenericKey<TWO_INTEGER_SIZE_B_TREE>;

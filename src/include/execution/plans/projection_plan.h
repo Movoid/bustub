@@ -36,6 +36,10 @@ class ProjectionPlanNode : public AbstractPlanNode {
    * @param expressions The expression to evaluate
    * @param child The child plan node
    */
+
+  /**
+   * Projection 只有一个子节点.
+   */
   ProjectionPlanNode(SchemaRef output, std::vector<AbstractExpressionRef> expressions, AbstractPlanNodeRef child)
       : AbstractPlanNode(std::move(output), {std::move(child)}), expressions_(std::move(expressions)) {}
 
@@ -55,8 +59,19 @@ class ProjectionPlanNode : public AbstractPlanNode {
 
   static auto RenameSchema(const Schema &schema, const std::vector<std::string> &col_names) -> Schema;
 
+  /**
+   * 生成一个 `CloneWithChildren` 接口,
+   * 拷贝一个当前 ProjectionPlanNode 的副本, 并设置其新的 `children_`.
+   */
   BUSTUB_PLAN_NODE_CLONE_WITH_CHILDREN(ProjectionPlanNode);
 
+  /**
+   * 描述 Projection 每次输出的一个 Tuple 的所有 Column 上的 Value,
+   * 如何从输入的元组求值得到.
+   * 每个 Expression 使用输入 Tuple 求值得到的 Value 就是输出元组的一个 Column 取值.
+   *
+   * 这里的 Expression 通过解析用户 SQL 得到.
+   */
   std::vector<AbstractExpressionRef> expressions_;
 
  protected:

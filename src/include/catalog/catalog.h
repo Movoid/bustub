@@ -43,6 +43,9 @@ enum class IndexType { BPlusTreeIndex, HashTableIndex, STLOrderedIndex, STLUnord
 
 /**
  * The TableInfo class maintains metadata about a table.
+ *
+ * 描述一个 Table 的 metadata.
+ * 从 Catalog 申请获取, 包含一个可用于实际访问 Table 的 TableHeap `table_`.
  */
 struct TableInfo {
   /**
@@ -66,6 +69,8 @@ struct TableInfo {
 
 /**
  * The IndexInfo class maintains metadata about a index.
+ *
+ * 注意 Update 操作也需要修改对应 Table 的所有 Index.
  */
 struct IndexInfo {
   /**
@@ -155,15 +160,18 @@ class Catalog {
     }
 
     // Fetch the table OID for the new table
+    /**
+     * 给新的 Table 分配 Table OID.
+     */
     const auto table_oid = next_table_oid_.fetch_add(1);
 
     // Construct the table information
     auto meta = std::make_shared<TableInfo>(schema, table_name, std::move(table), table_oid);
 
     // Update the internal tracking mechanisms
-    tables_.emplace(table_oid, meta);
-    table_names_.emplace(table_name, table_oid);
-    index_names_.emplace(table_name, std::unordered_map<std::string, index_oid_t>{});
+    tables_.emplace(table_oid, meta);                                                  // 添加 Table OID 查找 meta.
+    table_names_.emplace(table_name, table_oid);                                       // 添加 name 查找 OID.
+    index_names_.emplace(table_name, std::unordered_map<std::string, index_oid_t>{});  // 添加 name 查找 Index OID 表.
 
     return meta;
   }
@@ -379,6 +387,10 @@ class Catalog {
   std::unordered_map<std::string, table_oid_t> table_names_;
 
   /** The next table identifier to be used. */
+  /**
+   * OID, Object ID,
+   * 每个 Table 都有一个 Table OID, 从 0 开始分配.
+   */
   std::atomic<table_oid_t> next_table_oid_{0};
 
   /** Map index identifier -> index metadata. */
@@ -388,6 +400,9 @@ class Catalog {
   std::unordered_map<std::string, std::unordered_map<std::string, index_oid_t>> index_names_;
 
   /** The next index identifier to be used. */
+  /**
+   * 每个 Index 都有一个 Index OID, 从 0 开始分配.
+   */
   std::atomic<index_oid_t> next_index_oid_{0};
 };
 

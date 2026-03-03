@@ -24,8 +24,13 @@ namespace bustub {
 
 /**
  * @brief merge filter into filter_predicate of seq scan plan node
+ *
+ * 从 Filter 到 SeqScan 的谓词下推.
  */
 auto Optimizer::OptimizeMergeFilterScan(const AbstractPlanNodeRef &plan) -> AbstractPlanNodeRef {
+  /**
+   * 递归优化子 Plan 树.
+   */
   std::vector<AbstractPlanNodeRef> children;
   for (const auto &child : plan->GetChildren()) {
     children.emplace_back(OptimizeMergeFilterScan(child));

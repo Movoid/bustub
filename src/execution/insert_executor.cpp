@@ -25,12 +25,16 @@ namespace bustub {
  */
 InsertExecutor::InsertExecutor(ExecutorContext *exec_ctx, const InsertPlanNode *plan,
                                std::unique_ptr<AbstractExecutor> &&child_executor)
-    : AbstractExecutor(exec_ctx) {
-  UNIMPLEMENTED("TODO(P3): Add implementation.");
+    : AbstractExecutor{exec_ctx}, to_plan_{plan}, to_child_executor_{std::move(child_executor)} {
+  // UNIMPLEMENTED("TODO(P3): Add implementation.");
 }
 
 /** Initialize the insert */
-void InsertExecutor::Init() { UNIMPLEMENTED("TODO(P3): Add implementation."); }
+void InsertExecutor::Init() {
+  // UNIMPLEMENTED("TODO(P3): Add implementation.");
+  to_child_executor_->Init();
+  to_table_info_ = exec_ctx_->GetCatalog()->GetTable(to_plan_->GetTableOid()).get();
+}
 
 /**
  * Yield the number of rows inserted into the table.
@@ -40,9 +44,58 @@ void InsertExecutor::Init() { UNIMPLEMENTED("TODO(P3): Add implementation."); }
  *
  * NOTE: InsertExecutor::Next() does not use the `rid` out-parameter.
  * NOTE: InsertExecutor::Next() returns true with number of inserted rows produced only once.
+ *
+ * 类似 UpdateExecutor, 一直执行,
+ * 最后输出插入元组数量.
  */
 auto InsertExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool {
-  UNIMPLEMENTED("TODO(P3): Add implementation.");
+  // UNIMPLEMENTED("TODO(P3): Add implementation.");
+
+  if (is_consumed_) {
+    return false;
+  }
+
+  const auto to_all_index_info{exec_ctx_->GetCatalog()->GetTableIndexes(to_table_info_->name_)};
+
+  BUSTUB_ASSERT(to_table_info_->schema_.GetColumnCount() == to_child_executor_->GetOutputSchema().GetColumnCount(),
+                "Unexpected Schema.");
+
+  Tuple cur_tuple{};
+  RID cur_rid{};
+
+  while (to_child_executor_->Next(&cur_tuple, &cur_rid)) {
+    /**
+     * 插入新 Tuple.
+     */
+    auto &to_table{to_table_info_->table_};
+    TupleMeta insert_meta{0, false};
+    auto insert_rid_opt{to_table->InsertTuple(insert_meta, cur_tuple)};
+    BUSTUB_ASSERT(insert_rid_opt.has_value(), "Unexepcted fail.");
+    auto insert_rid{insert_rid_opt.value()};
+
+    /**
+     * 插入新 Index Entry.
+     */
+    for (auto &to_index_info : to_all_index_info) {
+      auto &cur_index{to_index_info->index_};
+      auto insert_key_tuple{
+          cur_tuple.KeyFromTuple(to_table_info_->schema_, to_index_info->key_schema_, cur_index->GetKeyAttrs())};
+      auto status{cur_index->InsertEntry(insert_key_tuple, insert_rid, exec_ctx_->GetTransaction())};
+      BUSTUB_ASSERT(status, "Unexpected fail.");
+    }
+    inserted_cnt_++;
+  }
+
+  /**
+   * 返回统计结果.
+   */
+  std::vector<Value> output_values{};
+  output_values.reserve(GetOutputSchema().GetColumnCount());
+  BUSTUB_ASSERT(output_values.capacity() == 1, "Unexpected plan.");
+  output_values.emplace_back(TypeId::INTEGER, inserted_cnt_);
+  *tuple = Tuple{output_values, &GetOutputSchema()};
+  is_consumed_ = true;
+  return true;
 }
 
 }  // namespace bustub

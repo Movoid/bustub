@@ -26,8 +26,11 @@
 
 namespace bustub {
 class AbstractExecutor;
+
 /**
  * ExecutorContext stores all the context necessary to run an executor.
+ *
+ * 为 Executor 的实际执行提供访问 DB 的接口.
  */
 class ExecutorContext {
  public:

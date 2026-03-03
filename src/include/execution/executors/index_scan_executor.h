@@ -28,7 +28,7 @@ class IndexScanExecutor : public AbstractExecutor {
  public:
   IndexScanExecutor(ExecutorContext *exec_ctx, const IndexScanPlanNode *plan);
 
-  auto GetOutputSchema() const -> const Schema & override { return plan_->OutputSchema(); }
+  auto GetOutputSchema() const -> const Schema & override { return to_plan_->OutputSchema(); }
 
   void Init() override;
 
@@ -36,6 +36,23 @@ class IndexScanExecutor : public AbstractExecutor {
 
  private:
   /** The index scan plan node to be executed. */
-  const IndexScanPlanNode *plan_;
+  const IndexScanPlanNode *to_plan_;
+
+  const TableInfo *to_table_info_{};
+
+  BPlusTreeIndexForTwoIntegerColumn *to_real_index_{};
+
+  /**
+   * 单点查询支持.
+   * 注意单点查询不要使用 BPlusTree
+   */
+  std::vector<RID> rids_;
+  int32_t next_predkey_pos_{};
+  int32_t next_rid_pos_{};
+
+  /**
+   * 顺序扫描支持.
+   */
+  std::unique_ptr<BPlusTreeIndexIteratorForTwoIntegerColumn> to_iter_;
 };
 }  // namespace bustub

@@ -24,6 +24,11 @@ TableIterator::TableIterator(TableHeap *table_heap, RID rid, RID stop_at_rid)
     : table_heap_(table_heap), rid_(rid), stop_at_rid_(stop_at_rid) {
   // If the rid doesn't correspond to a tuple (i.e., the table has just been initialized), then
   // we set rid_ to invalid.
+  /**
+   * 防御性检查.
+   * 对于 `{INVALID_PAGE_ID, 123}`, `{1, INT_MAX}` 之类的初始化参数,
+   * 会被修正到 `{INVALID_PAGE_ID, 0}`.
+   */
   if (rid.GetPageId() == INVALID_PAGE_ID) {
     rid_ = RID{INVALID_PAGE_ID, 0};
   } else {
@@ -54,15 +59,28 @@ auto TableIterator::operator++() -> TableIterator & {
         "iterate out of bound");
   }
 
+  /**
+   * 更新 `rid_` 后检查是否合法.
+   */
   rid_ = RID{rid_.GetPageId(), next_tuple_id};
 
   if (rid_ == stop_at_rid_) {
+    /**
+     * 到达右开位置, 到达终点, 设为 INVALID.
+     */
     rid_ = RID{INVALID_PAGE_ID, 0};
   } else if (next_tuple_id < page->GetNumTuples()) {
     // that's fine
   } else {
+    /**
+     * 此时 `next_tuple_id == page->GetNumTuples()`,
+     * 需要转移到下一个 page.
+     */
     auto next_page_id = page->GetNextPageId();
     // if next page is invalid, RID is set to invalid page; otherwise, it's the first tuple in that page.
+    /**
+     * 如果没有下一个 page, 此处会被设置为 INVALID.
+     */
     rid_ = RID{next_page_id, 0};
   }
 

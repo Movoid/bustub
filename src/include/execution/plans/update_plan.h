@@ -25,6 +25,8 @@ namespace bustub {
 /**
  * The UpdatePlanNode identifies a table that should be updated.
  * The tuple(s) to be updated come from the child of the UpdateExecutor.
+ *
+ * UpdatePlanNode 必须是根节点.
  */
 class UpdatePlanNode : public AbstractPlanNode {
  public:

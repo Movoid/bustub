@@ -24,6 +24,8 @@
 namespace bustub {
 /**
  * ColumnValueExpression maintains the tuple index and column index relative to a particular schema or join.
+ *
+ * 用于直接访问 Tuple 中某个 Column 取值的 Expression.
  */
 class ColumnValueExpression : public AbstractExpression {
  public:

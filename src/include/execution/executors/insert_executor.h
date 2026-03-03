@@ -35,11 +35,17 @@ class InsertExecutor : public AbstractExecutor {
   auto Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool override;
 
   /** @return The output schema for the insert */
-  auto GetOutputSchema() const -> const Schema & override { return plan_->OutputSchema(); };
+  auto GetOutputSchema() const -> const Schema & override { return to_plan_->OutputSchema(); };
 
  private:
   /** The insert plan node to be executed*/
-  const InsertPlanNode *plan_;
+  const InsertPlanNode *to_plan_{};
+
+  std::unique_ptr<AbstractExecutor> to_child_executor_;
+
+  const TableInfo *to_table_info_{};
+  int32_t inserted_cnt_{};
+  bool is_consumed_{};
 };
 
 }  // namespace bustub

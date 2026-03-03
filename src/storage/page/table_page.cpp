@@ -31,7 +31,10 @@ void TablePage::Init() {
   num_deleted_tuples_ = 0;
 }
 
-/** Get the next offset to insert, return nullopt if this tuple cannot fit in this page */
+/**
+ * Get the next offset to **insert**, return nullopt if this tuple cannot fit in this page.
+ * 注意, 这用于获取下一个可插入 Tuple 的位置.
+ */
 auto TablePage::GetNextTupleOffset(const TupleMeta &meta, const Tuple &tuple) const -> std::optional<uint16_t> {
   size_t slot_end_offset;
   if (num_tuples_ > 0) {
@@ -40,8 +43,18 @@ auto TablePage::GetNextTupleOffset(const TupleMeta &meta, const Tuple &tuple) co
   } else {
     slot_end_offset = BUSTUB_PAGE_SIZE;
   }
+
+  /**
+   * 注意区分,
+   * `slot_end_offset` 标记区间右开边界.
+   * `tuple_offset` 区间左闭边界.
+   */
   auto tuple_offset = slot_end_offset - tuple.GetLength();
-  auto offset_size = TABLE_PAGE_HEADER_SIZE + TUPLE_INFO_SIZE * (num_tuples_ + 1);
+  /**
+   * `offset_size` 得到 Page 前部分尝试插入新 `TupleInfo` 后, 已经使用了的空间的末尾 Offset.
+   * 尝试在 Page 尾部插入新的 Tuple, 若超越此 Offset 则空间不足.
+   */
+  auto offset_size = TABLE_PAGE_HEADER_SIZE + (TUPLE_INFO_SIZE * (num_tuples_ + 1));
   if (tuple_offset < offset_size) {
     return std::nullopt;
   }
@@ -58,15 +71,23 @@ auto TablePage::InsertTuple(const TupleMeta &meta, const Tuple &tuple) -> std::o
   if (tuple_offset == std::nullopt) {
     return std::nullopt;
   }
+  /**
+   * `tuple_offset` 有效, 则允许分配一个新的 Slot.
+   */
   auto tuple_id = num_tuples_;
   tuple_info_[tuple_id] = std::make_tuple(*tuple_offset, tuple.GetLength(), meta);
   num_tuples_++;
+  /**
+   * `tuple` 新 Tuple,
+   * 将其数据拷贝到 Page 的对应 Slot 位置上.
+   */
   memcpy(page_start_ + *tuple_offset, tuple.data_.data(), tuple.GetLength());
   return tuple_id;
 }
 
 /**
  * Update a tuple.
+ * 允许通过此函数删除一个 Tuple.
  */
 void TablePage::UpdateTupleMeta(const TupleMeta &meta, const RID &rid) {
   auto tuple_id = rid.GetSlotNum();

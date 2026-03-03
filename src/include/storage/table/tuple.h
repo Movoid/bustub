@@ -27,6 +27,9 @@ const timestamp_t INVALID_TS = -1;
 
 static constexpr size_t TUPLE_META_SIZE = 16;
 
+/**
+ * W-Timestamp 和 Tombstone 标记.
+ */
 struct TupleMeta {
   /** the ts / txn_id of this tuple. In project 3, simply set it to 0. */
   timestamp_t ts_;
@@ -47,6 +50,14 @@ static_assert(sizeof(TupleMeta) == TUPLE_META_SIZE);
  * ---------------------------------------------------------------------
  * | FIXED-SIZE or VARIED-SIZED OFFSET | PAYLOAD OF VARIED-SIZED FIELD |
  * ---------------------------------------------------------------------
+ *
+ * Tuple 在 DRAM 承载了来自 Disk 的, RID 位置的一个元组的 bytes.
+ * 前半部分包括定长数据, 和变长数据在 Tuple bytes 中的起始 offset.
+ * 后半部分实际存储变长数据.
+ *
+ * Tuple 仅存储 bytes.
+ * Schema 决定如何解释这段 bytes,
+ * 是类似 Value 和 Type 的设计.
  */
 class Tuple {
   friend class TablePage;
@@ -62,8 +73,14 @@ class Tuple {
 
   static auto Empty() -> Tuple { return Tuple{RID{INVALID_PAGE_ID, 0}}; }
 
+  /**
+   * 使用 Value 数组与匹配的 Schema 来构造 Tuple.
+   */
   Tuple(std::vector<Value> values, const Schema *schema);
 
+  /**
+   * 直接使用 bytes 来构造 Tuple.
+   */
   Tuple(RID rid, const char *data, uint32_t size);
 
   Tuple(const Tuple &other) = default;
@@ -95,6 +112,10 @@ class Tuple {
 
   auto GetValue(const Schema *schema, uint32_t column_idx) const -> Value;
 
+  /**
+   * 用于提取 Tuple 中部分 Column, 并得到新 Tuple 的工具.
+   * `schema` 是原 Schema, `key_schema` 是目标 Schema.
+   */
   auto KeyFromTuple(const Schema &schema, const Schema &key_schema, const std::vector<uint32_t> &key_attrs) const
       -> Tuple;
 

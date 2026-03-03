@@ -59,6 +59,11 @@ class SeqScanPlanNode : public AbstractPlanNode {
 
   /** The predicate to filter in seqscan.
    * For Fall 2023, We'll enable the MergeFilterScan rule, so we can further support index point lookup
+   *
+   * bustub 的 `OptimizeMergeFilterScan` 会进行谓词下推,
+   * 将 FilterPlanNode 的谓词转移给 SeqScanPlanNode.
+   *
+   * 注意此处是 Ref, 可能没有谓词, 需要检查.
    */
   AbstractExpressionRef filter_predicate_;
 

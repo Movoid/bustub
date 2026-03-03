@@ -27,6 +27,14 @@
 namespace bustub {
 class AbstractExpression;
 
+/**
+ * 用于描述 Column 的 metadata.
+ * Column 不负责处理 inline 逻辑.
+ *
+ * 任何类型数据都可以成为 inline/uninline 的,
+ * 由 Schema 决定.
+ */
+
 class Column {
   friend class Schema;
 
@@ -48,6 +56,8 @@ class Column {
    * @param type type of column
    * @param length length of the varlen
    * @param expr expression used to create this column
+   *
+   * VARCHAR 和 VECTOR 需要提供 `length` 信息.
    */
   Column(std::string column_name, TypeId type, uint32_t length)
       : column_name_(std::move(column_name)), column_type_(type), length_(TypeSize(type, length)) {
@@ -83,7 +93,11 @@ class Column {
   /** @return column type */
   auto GetType() const -> TypeId { return column_type_; }
 
-  /** @return true if column is inlined, false otherwise */
+  /**
+   * @return true if column is inlined, false otherwise.
+   *
+   * 此处决定只有 VARCHAR 和 VECTOR 会被 uninline 存储.
+   */
   auto IsInlined() const -> bool { return column_type_ != TypeId::VARCHAR && column_type_ != TypeId::VECTOR; }
 
   auto ToString(bool simplified = true) const -> std::string;
@@ -93,6 +107,10 @@ class Column {
    * Return the size in bytes of the type.
    * @param type type whose size is to be determined
    * @return size in bytes
+   *
+   * `static` 接口.
+   * 返回类型实际数据的长度.
+   * 对于 VARCHAR 和 VECTOR, 会按长度计算实际 bytes.
    */
   static auto TypeSize(TypeId type, uint32_t length = 0) -> uint8_t {
     switch (type) {

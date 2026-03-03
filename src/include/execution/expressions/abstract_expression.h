@@ -39,6 +39,10 @@ using AbstractExpressionRef = std::shared_ptr<AbstractExpression>;
 /**
  * AbstractExpression is the base class of all the expressions in the system.
  * Expressions are modeled as trees, i.e. every expression may have a variable number of children.
+ *
+ * Expression 描述一个求值过程.
+ * 给 Expression 提供一个 Tuple + Scheme, 可以 Evaluate 得到一个 Value.
+ * 则计算新元组的过程, 可以被建模为产生多个 Value 的过程, 则可以使用一连串 Expression 描述.
  */
 class AbstractExpression {
  public:
@@ -46,6 +50,9 @@ class AbstractExpression {
    * Create a new AbstractExpression with the given children and return type.
    * @param children the children of this abstract expression
    * @param ret_type the return type of this abstract expression when it is evaluated
+   *
+   * AbstractExpression 实际是一棵树,
+   * 其类型决定执行何种计算, 其直接 `children_` 是参与这种计算的操作数.
    */
   AbstractExpression(std::vector<AbstractExpressionRef> children, Column ret_type)
       : children_{std::move(children)}, ret_type_{std::move(ret_type)} {}

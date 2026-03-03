@@ -21,6 +21,9 @@ class ExecutorContext;
  * The AbstractExecutor implements the Volcano tuple-at-a-time iterator model.
  * This is the base class from which all executors in the BustTub execution
  * engine inherit, and defines the minimal interface that all executors support.
+ *
+ * Volcano 模型算子通用接口. 一次 push 一个元组.
+ * Executor 使用 **Plan 提供** 的 Expression 进行实际计算.
  */
 class AbstractExecutor {
  public:

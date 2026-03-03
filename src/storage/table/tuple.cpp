@@ -24,39 +24,72 @@ namespace bustub {
 // TODO(Amadou): It does not look like nulls are supported. Add a null bitmap?
 /**
  * constructor for creating a new tuple based on input value
+ *
+ * 基于提供的 Schema 来解释 `values`,
+ * 并将 `values` 中的 Value object 序列化到当前 Tuple 中.
  */
 Tuple::Tuple(std::vector<Value> values, const Schema *schema) {
   assert(values.size() == schema->GetColumnCount());
 
   // 1. Calculate the size of the tuple.
+
+  /**
+   * 先统计 inline 的数据 Size, 再逐个统计非 inline 的数据 Size.
+   */
   uint32_t tuple_size = schema->GetInlinedStorageSize();
   for (auto &i : schema->GetUnlinedColumns()) {
     auto len = values[i].GetStorageSize();
     if (len == BUSTUB_VALUE_NULL) {
       len = 0;
     }
+    /**
+     * 对每个 uninlined column 额外预留 uint32_t,
+     * 记录此 column 实际数据在 Tuple `data_` 中的起始 offset.
+     */
     tuple_size += sizeof(uint32_t) + len;
   }
 
   // 2. Allocate memory.
+
+  /**
+   * `data_` 将用于存放 Tuple 的 byte stream.
+   */
   data_.resize(tuple_size);
   std::fill(data_.begin(), data_.end(), 0);
 
   // 3. Serialize each attribute based on the input value.
   uint32_t column_count = schema->GetColumnCount();
+
+  /**
+   * `offset` 是 Tuple 末尾存储 uninline 实际数据的起始位置 pointer.
+   */
   uint32_t offset = schema->GetInlinedStorageSize();
 
   for (uint32_t i = 0; i < column_count; i++) {
     const auto &col = schema->GetColumn(i);
     if (!col.IsInlined()) {
       // Serialize relative offset, where the actual varchar data is stored.
+      /**
+       * 对于要求 uninline 存储的 Column,
+       * 仅存放 uint32_t 类型 offset, 标记 uninline 实际数据的起始 offset.
+       */
       *reinterpret_cast<uint32_t *>(data_.data() + col.GetOffset()) = offset;
       // Serialize varchar value, in place (size+data).
+      /**
+       * 在末尾存放真正的 uninline 数据.
+       * 此处序列化 Value,
+       * 对于 VARCHAR 和 VECTOR, 会先将其长度序列化, 再序列化实际数据.
+       */
       values[i].SerializeTo(data_.data() + offset);
       auto len = values[i].GetStorageSize();
       if (len == BUSTUB_VALUE_NULL) {
         len = 0;
       }
+      /**
+       * 此处 bustub 设计较耦合.
+       * uint32_t 是 VARCHAR 和 VECTOR 被序列化的长度信息字段.
+       * 为 NULL 时, 只有占据 uint32_t 大小的长度信息, `len` 实际为 0.
+       */
       offset += sizeof(uint32_t) + len;
     } else {
       values[i].SerializeTo(data_.data() + col.GetOffset());
