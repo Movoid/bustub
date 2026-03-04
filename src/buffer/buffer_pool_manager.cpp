@@ -115,6 +115,11 @@ BufferPoolManager::BufferPoolManager(size_t num_frames, DiskManager *disk_manage
   for (auto &ref_shard : page_table_.shards_) {
     ref_shard.map_.reserve((num_frames + page_table_.shards_.size() - 1) / page_table_.shards_.size());
   }
+
+  /**
+   * Patch for fixing early delete problem in bustub testcases.
+   */
+  disk_manager->RegisterDiskSchedulerForDebugOnly(disk_scheduler_.get());
 }
 
 /**

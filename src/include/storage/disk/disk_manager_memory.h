@@ -60,6 +60,11 @@ class DiskManagerUnlimitedMemory : public DiskManager {
  public:
   DiskManagerUnlimitedMemory();
 
+  /**
+   * 迫不得已的 patch.
+   */
+  ~DiskManagerUnlimitedMemory() override;
+
   void WritePage(page_id_t page_id, const char *page_data) override;
 
   void ReadPage(page_id_t page_id, char *page_data) override;

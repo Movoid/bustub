@@ -22,6 +22,7 @@
 #include "common/exception.h"
 #include "common/logger.h"
 #include "storage/disk/disk_manager.h"
+#include "storage/disk/disk_scheduler.h"
 
 namespace bustub {
 
@@ -64,6 +65,14 @@ DiskManager::DiskManager(const std::filesystem::path &db_file) : db_file_name_(d
   buffer_used = nullptr;
 }
 
+DiskManager::~DiskManager() {
+  /**
+   * WARNING: 子类先析构自己再析构父类.
+   * DiskManager 若作为父类, 此处的 ForceStop 仍不够早.
+   */
+  ForceDiskSchedulerStopForDebugOnly();
+}
+
 /**
  * Shut down the disk manager and close all the file resources.
  */
@@ -73,6 +82,16 @@ void DiskManager::ShutDown() {
     db_io_.close();
   }
   log_io_.close();
+}
+
+void DiskManager::RegisterDiskSchedulerForDebugOnly(DiskScheduler *to_scheduler) {
+  BUSTUB_ASSERT(to_active_disk_scheduler_ == nullptr, "Unexpected.");
+  to_active_disk_scheduler_ = to_scheduler;
+}
+
+void DiskManager::ForceDiskSchedulerStopForDebugOnly() {
+  BUSTUB_ASSERT(to_active_disk_scheduler_ != nullptr, "Unexpected.");
+  to_active_disk_scheduler_->ForceStopForDebugOnly();
 }
 
 /**

@@ -26,6 +26,8 @@
 
 namespace bustub {
 
+class DiskScheduler;
+
 /**
  * DiskManager takes care of the allocation and deallocation of pages within a database. It performs the reading and
  * writing of pages to and from disk, providing a logical file layer within the context of a database management system.
@@ -41,10 +43,23 @@ class DiskManager {
   /** FOR TEST / LEADERBOARD ONLY, used by DiskManagerMemory */
   DiskManager() = default;
 
-  virtual ~DiskManager() = default;
+  /**
+   * NOTE: 这是不得已的 patch.
+   *
+   * 在 bustub 的存储相关测试中, 在操作结束后 DiskManager 会被直接 delete 并析构.
+   * 由于 DiskScheduler 的异步设计, 在 DiskManager 被析构时, IO workers 可能还没有完成所有任务.
+   * 这会导致 IO worker 在进行 Disk IO 时, 调用已经被析构的 DiskManager 提供的 `ReadPage()/WritePage()` 接口.
+   *
+   * 需要在 DiskManager 析构时, 确保 DiskScheduler 结束工作.
+   * DiskScheduler 需要先向 DiskManager 注册自己.
+   */
+  virtual ~DiskManager();
 
   // 只用在 test 里的测试函数.
   void ShutDown();
+
+  void RegisterDiskSchedulerForDebugOnly(DiskScheduler *to_scheduler);
+  void ForceDiskSchedulerStopForDebugOnly();
 
   /**
    * Write a page to the database file.
@@ -129,6 +144,11 @@ class DiskManager {
   std::future<void> *flush_log_f_{nullptr};
   // With multiple buffer pool instances, need to protect file access
   std::mutex db_io_latch_;
+
+  /**
+   * 一些 patch.
+   */
+  DiskScheduler *to_active_disk_scheduler_{};
 };
 
 }  // namespace bustub

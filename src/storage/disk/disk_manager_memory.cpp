@@ -65,6 +65,13 @@ DiskManagerUnlimitedMemory::DiskManagerUnlimitedMemory() {
   std::fill(recent_access_.begin(), recent_access_.end(), -1);
 }
 
+DiskManagerUnlimitedMemory::~DiskManagerUnlimitedMemory() {
+  /**
+   * 必须 ForceStop DiskScheduler 才能开始析构 DiskManager.
+   */
+  ForceDiskSchedulerStopForDebugOnly();
+}
+
 /**
  * Write a page to the database file.
  * @param page_id id of the page

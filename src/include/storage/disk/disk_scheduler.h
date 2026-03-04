@@ -1238,6 +1238,13 @@ class DiskScheduler {
   explicit DiskScheduler(DiskManager *disk_manager);
   ~DiskScheduler();
 
+  /**
+   * 阻塞式调用,
+   * 用于修复 bustub testcase 中因不兼容异步 Scheduler 而导致的 early delete problem 而存在.
+   * 要求所有 worker 立刻安全结束工作.
+   */
+  void ForceStopForDebugOnly();
+
   // 通过 Schedule 启动一个写磁盘任务.
   auto Schedule(DiskRequest r) -> bool;
 

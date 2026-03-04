@@ -248,10 +248,30 @@ DiskScheduler::DiskScheduler(DiskManager *disk_manager)
 }
 
 DiskScheduler::~DiskScheduler() {
+  /**
+   * 在 ForceStopForDebugOnly() 调用后,
+   * 直接 early return, 否则 `join` 会异常.
+   */
+  if (stop_.load(std::memory_order_acquire)) {
+    return;
+  }
   stop_.store(true, std::memory_order_release);
   /**
    * 如果未来支持单 Shard 多 worker, 此处需要投递多个 `nullptr`.
    */
+  for (auto &shard : worker_table_.shards_) {
+    shard.pending_queue_.Push(nullptr);
+  }
+  for (auto &worker : worker_) {
+    worker.join();
+  }
+}
+
+void DiskScheduler::ForceStopForDebugOnly() {
+  if (stop_.load(std::memory_order_acquire)) {
+    return;
+  }
+  stop_.store(true, std::memory_order_release);
   for (auto &shard : worker_table_.shards_) {
     shard.pending_queue_.Push(nullptr);
   }
