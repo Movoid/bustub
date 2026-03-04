@@ -32,6 +32,10 @@ InsertExecutor::InsertExecutor(ExecutorContext *exec_ctx, const InsertPlanNode *
 /** Initialize the insert */
 void InsertExecutor::Init() {
   // UNIMPLEMENTED("TODO(P3): Add implementation.");
+
+  inserted_cnt_ = 0;
+  is_consumed_ = false;
+
   to_child_executor_->Init();
   to_table_info_ = exec_ctx_->GetCatalog()->GetTable(to_plan_->GetTableOid()).get();
 }
@@ -93,7 +97,7 @@ auto InsertExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool {
   output_values.reserve(GetOutputSchema().GetColumnCount());
   BUSTUB_ASSERT(output_values.capacity() == 1, "Unexpected plan.");
   output_values.emplace_back(TypeId::INTEGER, inserted_cnt_);
-  *tuple = Tuple{output_values, &GetOutputSchema()};
+  *tuple = Tuple{std::move(output_values), &GetOutputSchema()};
   is_consumed_ = true;
   return true;
 }

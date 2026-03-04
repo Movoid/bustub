@@ -132,7 +132,7 @@ class Tuple {
  private:
   auto GetDataPtr(const Schema *schema, uint32_t column_idx) const -> const char *;
 
-  RID rid_{};  // if pointing to the table heap, the rid is valid
+  RID rid_{INVALID_PAGE_ID, 0};  // if pointing to the table heap, the rid is valid
   std::vector<char> data_;
 };
 

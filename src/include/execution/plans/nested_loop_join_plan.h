@@ -61,7 +61,12 @@ class NestedLoopJoinPlanNode : public AbstractPlanNode {
 
   BUSTUB_PLAN_NODE_CLONE_WITH_CHILDREN(NestedLoopJoinPlanNode);
 
-  /** The join predicate */
+  /**
+   * The join predicate
+   *
+   * 判断两个元组是否可以 JOIN.
+   * 注意判空.
+   */
   AbstractExpressionRef predicate_;
 
   /** The join type */

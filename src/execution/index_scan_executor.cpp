@@ -31,6 +31,11 @@ IndexScanExecutor::IndexScanExecutor(ExecutorContext *exec_ctx, const IndexScanP
 }
 
 void IndexScanExecutor::Init() {
+  rids_.clear();
+  next_predkey_pos_ = 0;
+  next_rid_pos_ = 0;
+  to_iter_.reset();
+
   to_table_info_ = exec_ctx_->GetCatalog()->GetTable(to_plan_->GetTableOid()).get();
   auto to_index{exec_ctx_->GetCatalog()->GetIndex(to_plan_->GetIndexOid())->index_.get()};
   to_real_index_ = dynamic_cast<BPlusTreeIndexForTwoIntegerColumn *>(to_index);
@@ -84,7 +89,7 @@ auto IndexScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
      * 填充 `rids_`.
      */
     if (next_rid_pos_ == 0) {
-      BUSTUB_ASSERT(rids_.size() == 0, "Unexpected.");
+      BUSTUB_ASSERT(rids_.empty(), "Unexpected.");
       std::vector<Value> key_values{};
       key_values.reserve(1);
 
@@ -92,10 +97,10 @@ auto IndexScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
                     "Unexpected expression.");
 
       key_values.emplace_back(to_plan_->pred_keys_[next_predkey_pos_]->Evaluate(nullptr, Schema{{}}));
-      Tuple key_tuple{key_values, to_real_index_->GetKeySchema()};
+      Tuple key_tuple{std::move(key_values), to_real_index_->GetKeySchema()};
       to_real_index_->ScanKey(key_tuple, &rids_, exec_ctx_->GetTransaction());
       BUSTUB_ASSERT(rids_.size() <= 1, "Unexpected.");
-      if (rids_.size() == 0) {
+      if (rids_.empty()) {
         next_predkey_pos_++;
         continue;
       }

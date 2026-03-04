@@ -27,6 +27,8 @@ SeqScanExecutor::SeqScanExecutor(ExecutorContext *exec_ctx, const SeqScanPlanNod
 
 /** Initialize the sequential scan */
 void SeqScanExecutor::Init() {
+  to_iter_.reset();
+
   to_table_info_ = exec_ctx_->GetCatalog()->GetTable(to_plan_->GetTableOid()).get();
   to_iter_ = std::make_unique<TableIterator>(to_table_info_->table_->MakeIterator());
 }

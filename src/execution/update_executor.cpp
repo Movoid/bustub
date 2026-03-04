@@ -34,6 +34,10 @@ UpdateExecutor::UpdateExecutor(ExecutorContext *exec_ctx, const UpdatePlanNode *
 /** Initialize the update */
 void UpdateExecutor::Init() {
   // UNIMPLEMENTED("TODO(P3): Add implementation.");
+
+  updated_cnt_ = 0;
+  is_consumed_ = false;
+
   /**
    * 记得先 Init 子 Executor.
    */
@@ -80,9 +84,9 @@ auto UpdateExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool {
    */
   Tuple cur_tuple{};
   RID cur_rid{};
-  std::vector<Value> insert_values{};
-  insert_values.reserve(to_table_info_->schema_.GetColumnCount());
   while (to_child_executor_->Next(&cur_tuple, &cur_rid)) {
+    std::vector<Value> insert_values{};
+    insert_values.reserve(to_table_info_->schema_.GetColumnCount());
     /**
      * 删除旧 Tuple.
      */
@@ -101,7 +105,7 @@ auto UpdateExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool {
      * 插入新 Tuple.
      */
     TupleMeta insert_meta{0, false};  // WARNING: SHOULD BE FIXED IN THE FUTURE.
-    Tuple insert_tuple{insert_values, &to_table_info_->schema_};
+    Tuple insert_tuple{std::move(insert_values), &to_table_info_->schema_};
     auto insert_rid_opt{to_table->InsertTuple(insert_meta, insert_tuple)};
     BUSTUB_ASSERT(insert_rid_opt.has_value(), "Invalid RID.");
     BUSTUB_ASSERT(insert_rid_opt->GetPageId(), "Invalid RID.");
@@ -134,7 +138,7 @@ auto UpdateExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool {
   output_values.reserve(GetOutputSchema().GetColumnCount());
   BUSTUB_ASSERT(output_values.capacity() == 1, "Unexpected plan.");
   output_values.emplace_back(TypeId::INTEGER, updated_cnt_);
-  *tuple = Tuple{output_values, &GetOutputSchema()};
+  *tuple = Tuple{std::move(output_values), &GetOutputSchema()};
   is_consumed_ = true;
   return true;
 }

@@ -81,18 +81,37 @@ class AggregationPlanNode : public AbstractPlanNode {
 
   BUSTUB_PLAN_NODE_CLONE_WITH_CHILDREN(AggregationPlanNode);
 
-  /** The GROUP BY expressions */
+  /**
+   * The GROUP BY expressions
+   *
+   * 被 GROUP BY 的表达式, 通常是 ColumnValueExpression.
+   */
   std::vector<AbstractExpressionRef> group_bys_;
-  /** The aggregation expressions */
+
+  /**
+   * The aggregation expressions
+   *
+   * 存储需要经过聚合函数运算的 Expression.
+   */
   std::vector<AbstractExpressionRef> aggregates_;
-  /** The aggregation types */
+  /**
+   * The aggregation types
+   *
+   * 存储 `aggregates_` 中需要使用的聚合函数的类型.
+   */
   std::vector<AggregationType> agg_types_;
 
  protected:
   auto PlanNodeToString() const -> std::string override;
 };
 
-/** AggregateKey represents a key in an aggregation operation */
+/**
+ * AggregateKey represents a key in an aggregation operation
+ *
+ * 存储一个复合 Key 的 Value, 由 `GROUP BY ...` 中 `...` 每一行的取值复合而成.
+ * 在 AggregationExecutor 中, 对每个 AggregateKey 的取值,
+ * 输出其 `SELECT` 中聚合函数的结果.
+ */
 struct AggregateKey {
   /** The group-by values */
   std::vector<Value> group_bys_;
@@ -112,7 +131,12 @@ struct AggregateKey {
   }
 };
 
-/** AggregateValue represents a value for each of the running aggregates */
+/**
+ * AggregateValue represents a value for each of the running aggregates
+ *
+ * 存储对于一个 AggregateKey, 其聚合函数的结果.
+ * 运行时动态维护.
+ */
 struct AggregateValue {
   /** The aggregate values */
   std::vector<Value> aggregates_;
