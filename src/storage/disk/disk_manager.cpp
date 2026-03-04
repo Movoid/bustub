@@ -84,9 +84,9 @@ void DiskManager::ShutDown() {
   log_io_.close();
 }
 
-void DiskManager::RegisterDiskSchedulerForDebugOnly(DiskScheduler *to_scheduler) {
+void DiskManager::RegisterDiskSchedulerForDebugOnly(std::shared_ptr<DiskScheduler> to_scheduler) {
   BUSTUB_ASSERT(to_active_disk_scheduler_ == nullptr, "Unexpected.");
-  to_active_disk_scheduler_ = to_scheduler;
+  to_active_disk_scheduler_ = std::move(to_scheduler);
 }
 
 void DiskManager::ForceDiskSchedulerStopForDebugOnly() {

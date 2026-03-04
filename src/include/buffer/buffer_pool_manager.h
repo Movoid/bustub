@@ -197,7 +197,7 @@ class BufferPoolManager {
   std::shared_ptr<ShardingLRUKReplacer> replacer_;
 
   /** @brief A pointer to the disk scheduler. */
-  std::unique_ptr<DiskScheduler> disk_scheduler_;
+  std::shared_ptr<DiskScheduler> disk_scheduler_;
 
   /**
    * @brief A pointer to the log manager.

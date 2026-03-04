@@ -99,8 +99,8 @@ BufferPoolManager::BufferPoolManager(size_t num_frames, DiskManager *disk_manage
                                      LogManager *log_manager)
     : num_frames_(num_frames),
       next_page_id_(0),
-      replacer_(std::make_unique<ShardingLRUKReplacer>(num_frames, k_dist)),
-      disk_scheduler_(std::make_unique<DiskScheduler>(disk_manager)),
+      replacer_(std::make_shared<ShardingLRUKReplacer>(num_frames, k_dist)),
+      disk_scheduler_(std::make_shared<DiskScheduler>(disk_manager)),
       log_manager_(log_manager) {
   // Initialize the monotonically increasing counter at 0.
   next_page_id_.store(0);
@@ -119,7 +119,7 @@ BufferPoolManager::BufferPoolManager(size_t num_frames, DiskManager *disk_manage
   /**
    * Patch for fixing early delete problem in bustub testcases.
    */
-  disk_manager->RegisterDiskSchedulerForDebugOnly(disk_scheduler_.get());
+  disk_manager->RegisterDiskSchedulerForDebugOnly(disk_scheduler_);
 }
 
 /**

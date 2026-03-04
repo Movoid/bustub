@@ -58,7 +58,7 @@ class DiskManager {
   // 只用在 test 里的测试函数.
   void ShutDown();
 
-  void RegisterDiskSchedulerForDebugOnly(DiskScheduler *to_scheduler);
+  void RegisterDiskSchedulerForDebugOnly(std::shared_ptr<DiskScheduler> to_scheduler);
   void ForceDiskSchedulerStopForDebugOnly();
 
   /**
@@ -148,7 +148,7 @@ class DiskManager {
   /**
    * 一些 patch.
    */
-  DiskScheduler *to_active_disk_scheduler_{};
+  std::shared_ptr<DiskScheduler> to_active_disk_scheduler_;
 };
 
 }  // namespace bustub
