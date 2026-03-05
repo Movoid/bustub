@@ -30,8 +30,8 @@ NestedLoopJoinExecutor::NestedLoopJoinExecutor(ExecutorContext *exec_ctx, const 
                                                std::unique_ptr<AbstractExecutor> &&right_executor)
     : AbstractExecutor{exec_ctx},
       to_plan_{plan},
-      left_executor_{std::move(left_executor)},
-      right_executor_{std::move(right_executor)} {
+      to_left_executor_{std::move(left_executor)},
+      to_right_executor_{std::move(right_executor)} {
   if (!(plan->GetJoinType() == JoinType::LEFT || plan->GetJoinType() == JoinType::INNER)) {  // NOLINT
     // Note for Spring 2025: You ONLY need to implement left join and inner join.
     throw bustub::NotImplementedException(fmt::format("join type {} not supported", plan->GetJoinType()));
@@ -57,15 +57,12 @@ void NestedLoopJoinExecutor::Init() {
               .GetColumnCount(),
       "Unexpected.");
 
+  cur_loop_is_ended_ = true;
   cur_l_tuple_is_joined_ = false;
   is_consumed_ = false;
 
-  left_executor_->Init();
-  right_executor_->Init();
-  auto l_status{left_executor_->Next(&cur_l_tuple_, &cur_l_rid_)};
-  if (!l_status) {
-    is_consumed_ = true;
-  }
+  to_left_executor_->Init();
+  to_right_executor_->Init();
 }
 
 /**
@@ -89,12 +86,23 @@ auto NestedLoopJoinExecutor::Next(Tuple *tuple, RID *rid) -> bool {
   RID cur_r_rid{};
 
   while (true) {
-    auto r_status{right_executor_->Next(&cur_r_tuple, &cur_r_rid)};
+    if (cur_loop_is_ended_) {
+      auto l_status{to_left_executor_->Next(&cur_l_tuple_, &cur_l_rid_)};
+      if (!l_status) {
+        is_consumed_ = true;
+        return false;
+      }
+      to_right_executor_->Init();
+      cur_l_tuple_is_joined_ = false;
+      cur_loop_is_ended_ = false;
+    }
+
+    auto r_status{to_right_executor_->Next(&cur_r_tuple, &cur_r_rid)};
     if (!r_status) {
+      cur_loop_is_ended_ = true;
       /**
-       * LEFT JOIN. 保留左表 Tuple.
+       * LEFT JOIN?
        */
-      bool have_output{};
       if (to_plan_->GetJoinType() == JoinType::LEFT && !cur_l_tuple_is_joined_) {
         std::vector<Value> output_values{};
         output_values.reserve(to_plan_->OutputSchema().GetColumnCount());
@@ -108,33 +116,21 @@ auto NestedLoopJoinExecutor::Next(Tuple *tuple, RID *rid) -> bool {
         }
         *tuple = Tuple{std::move(output_values), &to_plan_->OutputSchema()};
         *rid = RID{INVALID_PAGE_ID, 0};
-        have_output = true;
-      }
-
-      auto l_status{left_executor_->Next(&cur_l_tuple_, &cur_l_rid_)};
-      if (!l_status) {
-        is_consumed_ = true;
-        return have_output;
-      }
-      cur_l_tuple_is_joined_ = false;
-      right_executor_->Init();
-      if (have_output) {
         return true;
       }
       continue;
     }
 
-    /**
-     * 不符合 JOIN 条件?
-     */
-    if (to_plan_->Predicate() != nullptr) {
-      auto pred_val{to_plan_->Predicate()->EvaluateJoin(&cur_l_tuple_, to_plan_->GetLeftPlan()->OutputSchema(),
-                                                        &cur_r_tuple, to_plan_->GetRightPlan()->OutputSchema())};
+    auto to_pred_expr{to_plan_->Predicate()};
+    if (to_pred_expr != nullptr) {
+      auto pred_val{to_pred_expr->EvaluateJoin(&cur_l_tuple_, to_left_executor_->GetOutputSchema(), &cur_r_tuple,
+                                               to_right_executor_->GetOutputSchema())};
       BUSTUB_ASSERT(pred_val.GetTypeId() == TypeId::BOOLEAN, "Unexpected.");
       if (pred_val.IsNull() || !pred_val.GetAs<bool>()) {
         continue;
       }
     }
+
     cur_l_tuple_is_joined_ = true;
     std::vector<Value> output_values{};
     output_values.reserve(to_plan_->OutputSchema().GetColumnCount());

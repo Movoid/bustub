@@ -62,6 +62,10 @@ auto NestedIndexJoinExecutor::Next(Tuple *tuple, RID *rid) -> bool {
   const auto &inner_schema{to_plan_->InnerTableSchema()};
 
   while (true) {
+    /**
+     * 使用新的 Outer Tuple?
+     * 加载 `rids_`.
+     */
     if (next_rid_pos_ == 0) {
       BUSTUB_ASSERT(rids_.empty(), "Unexpected.");
       auto outer_status{to_outer_executor_->Next(&cur_outer_tuple_, &cur_outer_rid_)};
@@ -79,6 +83,10 @@ auto NestedIndexJoinExecutor::Next(Tuple *tuple, RID *rid) -> bool {
       BUSTUB_ASSERT(rids_.size() <= 1, "Unexpected.");
     }
 
+    /**
+     * 在加载 `rids_` 后,
+     * `rids_` 是否用尽?
+     */
     if (rids_.empty() || next_rid_pos_ == static_cast<int32_t>(rids_.size())) {
       bool left_join_need_ret{to_plan_->GetJoinType() == JoinType::LEFT && !cur_outer_tuple_is_joined_};
       if (left_join_need_ret) {

@@ -41,11 +41,13 @@ class NestedLoopJoinExecutor : public AbstractExecutor {
   /** The NestedLoopJoin plan node to be executed. */
   const NestedLoopJoinPlanNode *to_plan_;
 
-  std::unique_ptr<AbstractExecutor> left_executor_;
-  std::unique_ptr<AbstractExecutor> right_executor_;
+  std::unique_ptr<AbstractExecutor> to_left_executor_;
+  std::unique_ptr<AbstractExecutor> to_right_executor_;
 
   Tuple cur_l_tuple_;
   RID cur_l_rid_{INVALID_PAGE_ID, 0};
+
+  bool cur_loop_is_ended_{true};
 
   bool cur_l_tuple_is_joined_{};
 

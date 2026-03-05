@@ -21,6 +21,9 @@ namespace bustub {
  * @param plan The HashJoin join plan to be executed
  * @param left_child The child executor that produces tuples for the left side of join
  * @param right_child The child executor that produces tuples for the right side of join
+ *
+ * bustub 假设 DRAM 足够承载 HashMap.
+ * 实现 Grace Hash Join 不是必要的.
  */
 HashJoinExecutor::HashJoinExecutor(ExecutorContext *exec_ctx, const HashJoinPlanNode *plan,
                                    std::unique_ptr<AbstractExecutor> &&left_child,
