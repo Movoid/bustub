@@ -69,11 +69,11 @@ auto NestedIndexJoinExecutor::Next(Tuple *tuple, RID *rid) -> bool {
     if (next_rid_pos_ == 0) {
       BUSTUB_ASSERT(rids_.empty(), "Unexpected.");
       auto outer_status{to_outer_executor_->Next(&cur_outer_tuple_, &cur_outer_rid_)};
-      cur_outer_tuple_is_joined_ = false;
       if (!outer_status) {
         is_consumed_ = true;
         return false;
       }
+      cur_outer_tuple_is_joined_ = false;
 
       std::vector<Value> key_values{};
       key_values.reserve(1);

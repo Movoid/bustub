@@ -53,8 +53,15 @@ class Value {
 
  public:
   /**
-   * bustub 中的 NULL Value,
+   * bustub 中有 NULL Value,
    * 其有 Type, 但取值为 NULL.
+   *
+   * 一般来说, NULL 是 Value{BUSTUB_<TYPE>_NULL, BUSTUB_VALUE_NULL} .
+   */
+
+  /**
+   * 不要使用此 constructor 构造 NULL, 应该使用 ValueFactory.
+   * 这会导致 `value_` 未初始化, 导致 HashUtil 计算错误.
    */
   explicit Value(const TypeId type) : manage_data_(false), type_id_(type) { size_.len_ = BUSTUB_VALUE_NULL; }
   // BOOLEAN and TINYINT
