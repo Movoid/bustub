@@ -36,86 +36,141 @@ class SortPage {
    * TODO(P3): Define and implement the methods for reading data from and writing data to the sort
    * page. Feel free to add other helper methods.
    */
+
+  SortPage() = delete;
+  SortPage(const SortPage &) = delete;
+  ~SortPage() = delete;
+
+  void Init(const Schema &schema) {
+    BUSTUB_ASSERT(schema.IsInlined(), "Unsupported.");
+    /**
+     * Tuple 的 `SerializeTo` 会先写 int32_t 的 `data_.size()`.
+     */
+    unit_size_ = schema.GetInlinedStorageSize() + sizeof(int32_t);
+    size_ = 0;
+    capacity_ = DATA_SIZE / unit_size_;
+  }
+
+  auto GetUnitSize() const -> uint32_t { return unit_size_; }
+  auto GetSize() const -> uint32_t { return size_; }
+  auto GetCapacity() const -> uint32_t { return capacity_; }
+
+  auto IsFull() const -> bool { return size_ == capacity_; }
+
+  auto GetSlot(uint32_t k) const -> const char * {
+    BUSTUB_ASSERT(k < capacity_, "Unexpected.");
+    return &data_[k * unit_size_];
+  }
+
+  void SerializeAppendData(const Tuple &tuple) {
+    BUSTUB_ASSERT(!IsFull(), "Unexpected.");
+    auto to_slot{&data_[size_ * unit_size_]};
+    tuple.SerializeTo(to_slot);
+    size_++;
+  }
+
  private:
   /**
    * TODO(P3): Define the private members. You may want to have some necessary metadata for
    * the sort page before the start of the actual data.
    */
+
+  constexpr static int32_t SORTPAGE_HEADER_SIZE{sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint32_t)};
+  constexpr static int32_t DATA_SIZE{BUSTUB_PAGE_SIZE - SORTPAGE_HEADER_SIZE};
+
+  uint32_t unit_size_{};
+  uint32_t size_{};
+  uint32_t capacity_{};
+  char data_[DATA_SIZE];
 };
 
 /**
  * A data structure that holds the sorted tuples as a run during external merge sort.
  * Tuples might be stored in multiple pages, and tuples are ordered both within one page
  * and across pages.
+ *
+ * x pages 的 tuples 排序后仍是 x pages.
+ * 每个 Run 包含至少 1 个 Page ID, Run 内的所有 Tuples 都已经有序.
+ * k-way 归并将 k 个 Run 合并为一个 Run, 并返回给递归上层.
  */
 class MergeSortRun {
  public:
   MergeSortRun() = default;
-  MergeSortRun(std::vector<page_id_t> pages, BufferPoolManager *bpm) : pages_(std::move(pages)), bpm_(bpm) {}
+  MergeSortRun(std::vector<page_id_t> pages, BufferPoolManager *bpm) : pages_(std::move(pages)), to_bpm_(bpm) {}
 
   auto GetPageCount() -> size_t { return pages_.size(); }
 
-  /** Iterator for iterating on the sorted tuples in one run. */
+  /**
+   * ForwardIterator.
+   */
   class Iterator {
     friend class MergeSortRun;
 
    public:
-    Iterator() = default;
+    auto operator++() -> Iterator & {
+      BUSTUB_ASSERT(next_page_pos_ < static_cast<uint32_t>(to_run_->pages_.size()), "Unexpected.");
+      auto to_sortpage{page_g_.As<SortPage>()};
+      next_in_page_slot_pos_++;
 
-    /**
-     * Advance the iterator to the next tuple. If the current sort page is exhausted, move to the
-     * next sort page.
-     */
-    auto operator++() -> Iterator & { UNIMPLEMENTED("TODO(P3): Add implementation."); }
+      if (next_in_page_slot_pos_ == to_sortpage->GetSize()) {
+        next_in_page_slot_pos_ = 0;
+        next_page_pos_++;
+      }
 
-    /**
-     * Dereference the iterator to get the current tuple in the sorted run that the iterator is
-     * pointing to.
-     */
-    auto operator*() -> Tuple { UNIMPLEMENTED("TODO(P3): Add implementation."); }
+      if (next_page_pos_ == static_cast<uint32_t>(to_run_->pages_.size())) {
+        next_in_page_slot_pos_ = UINT32_MAX;
+        next_page_pos_ = UINT32_MAX;
+        page_g_.Drop();
+        return *this;
+      }
 
-    /**
-     * Checks whether two iterators are pointing to the same tuple in the same sorted run.
-     */
-    auto operator==(const Iterator &other) const -> bool { UNIMPLEMENTED("TODO(P3): Add implementation."); }
+      page_g_ = to_run_->to_bpm_->ReadPage(to_run_->pages_[next_page_pos_]);
+      to_sortpage = page_g_.As<SortPage>();
+      BUSTUB_ASSERT(next_in_page_slot_pos_ < to_sortpage->GetSize(), "Unexpected.");
+      return *this;
+    }
 
-    /**
-     * Checks whether two iterators are pointing to different tuples in a sorted run or iterating
-     * on different sorted runs.
-     */
-    auto operator!=(const Iterator &other) const -> bool { UNIMPLEMENTED("TODO(P3): Add implementation."); }
+    auto operator*() -> Tuple {
+      auto to_sortpage{page_g_.As<SortPage>()};
+      Tuple ret{};
+      ret.DeserializeFrom(to_sortpage->GetSlot(next_in_page_slot_pos_));
+      return ret;
+    }
+
+    auto operator==(const Iterator &other) const -> bool {
+      return to_run_ == other.to_run_ && next_page_pos_ == other.next_page_pos_ &&
+             next_in_page_slot_pos_ == other.next_in_page_slot_pos_;
+    }
+
+    auto operator!=(const Iterator &other) const -> bool { return !(*this == other); }
 
    private:
-    explicit Iterator(const MergeSortRun *run) : run_(run) {}
+    Iterator(const MergeSortRun *run, uint32_t next_page_pos, uint32_t next_in_page_slot_pos)
+        : to_run_{run}, next_page_pos_{next_page_pos}, next_in_page_slot_pos_{next_in_page_slot_pos} {
+      if (next_page_pos < static_cast<uint32_t>(to_run_->pages_.size())) {
+        page_g_ = to_run_->to_bpm_->ReadPage(to_run_->pages_[next_page_pos_]);
+      }
+    }
 
-    /** The sorted run that the iterator is iterating on. */
-    [[maybe_unused]] const MergeSortRun *run_;
-
-    /**
-     * TODO(P3): Add your own private members here. You may want something to record your current
-     * position in the sorted run. Also feel free to add additional constructors to initialize
-     * your private members.
-     */
+    const MergeSortRun *to_run_{};
+    ReadPageGuard page_g_;
+    uint32_t next_page_pos_{UINT32_MAX};
+    uint32_t next_in_page_slot_pos_{UINT32_MAX};
   };
 
-  /**
-   * Get an iterator pointing to the beginning of the sorted run, i.e. the first tuple.
-   */
-  auto Begin() -> Iterator { UNIMPLEMENTED("TODO(P3): Add implementation."); }
+  auto Begin() -> Iterator {
+    if (pages_.empty()) {
+      return Iterator{this, UINT32_MAX, UINT32_MAX};
+    }
+    return Iterator{this, 0, 0};
+  }
 
-  /**
-   * Get an iterator pointing to the end of the sorted run, i.e. the position after the last tuple.
-   */
-  auto End() -> Iterator { UNIMPLEMENTED("TODO(P3): Add implementation."); }
+  auto End() -> Iterator { return Iterator{this, UINT32_MAX, UINT32_MAX}; }
 
  private:
-  /** The page IDs of the sort pages that store the sorted tuples. */
   std::vector<page_id_t> pages_;
-  /**
-   * The buffer pool manager used to read sort pages. The buffer pool manager is responsible for
-   * deleting the sort pages when they are no longer needed.
-   */
-  [[maybe_unused]] BufferPoolManager *bpm_;
+
+  BufferPoolManager *to_bpm_;
 };
 
 /**
@@ -129,21 +184,28 @@ class ExternalMergeSortExecutor : public AbstractExecutor {
   ExternalMergeSortExecutor(ExecutorContext *exec_ctx, const SortPlanNode *plan,
                             std::unique_ptr<AbstractExecutor> &&child_executor);
 
+  ~ExternalMergeSortExecutor() override;
+
   void Init() override;
 
   auto Next(Tuple *tuple, RID *rid) -> bool override;
 
   /** @return The output schema for the external merge sort */
-  auto GetOutputSchema() const -> const Schema & override { return plan_->OutputSchema(); }
+  auto GetOutputSchema() const -> const Schema & override { return to_plan_->OutputSchema(); }
 
  private:
   /** The sort plan node to be executed */
-  const SortPlanNode *plan_;
+  const SortPlanNode *to_plan_;
+
+  std::unique_ptr<AbstractExecutor> to_child_executor_;
 
   /** Compares tuples based on the order-bys */
   TupleComparator cmp_;
 
-  /** TODO(P3): You will want to add your own private members here. */
+  std::vector<page_id_t> sorted_pages_;
+  MergeSortRun sorted_run_;
+  std::optional<MergeSortRun::Iterator> iter_opt_;
+  bool is_built_{};
 };
 
 }  // namespace bustub

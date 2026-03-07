@@ -23,7 +23,41 @@ namespace bustub {
 TupleComparator::TupleComparator(std::vector<OrderBy> order_bys) : order_bys_(std::move(order_bys)) {}
 
 /** TODO(P3): Implement the comparison method */
-auto TupleComparator::operator()(const SortEntry &entry_a, const SortEntry &entry_b) const -> bool { return false; }
+auto TupleComparator::operator()(const SortEntry &entry_a, const SortEntry &entry_b) const -> bool {
+  BUSTUB_ASSERT(entry_a.first.size() == order_bys_.size(), "Unexpected.");
+  BUSTUB_ASSERT(entry_b.first.size() == order_bys_.size(), "Unexpected.");
+
+  for (size_t i = 0; i < order_bys_.size(); i++) {
+    const auto &l_val = entry_a.first[i];
+    const auto &r_val = entry_b.first[i];
+    const auto is_less = l_val.CompareLessThan(r_val);
+    const auto is_greater = l_val.CompareGreaterThan(r_val);
+    BUSTUB_ASSERT(is_less != CmpBool::CmpNull && is_greater != CmpBool::CmpNull, "Unsupported.");
+
+    switch (order_bys_[i].first) {
+      case OrderByType::ASC:
+      case OrderByType::DEFAULT:
+        if (is_less == CmpBool::CmpTrue) {
+          return true;
+        }
+        if (is_greater == CmpBool::CmpTrue) {
+          return false;
+        }
+        break;
+      case OrderByType::DESC:
+        if (is_greater == CmpBool::CmpTrue) {
+          return true;
+        }
+        if (is_less == CmpBool::CmpTrue) {
+          return false;
+        }
+        break;
+      case OrderByType::INVALID:
+        BUSTUB_ASSERT(false, "Invalid.");
+    }
+  }
+  return false;
+}
 
 /**
  * Generate sort key for a tuple based on the order by expressions.
@@ -31,7 +65,12 @@ auto TupleComparator::operator()(const SortEntry &entry_a, const SortEntry &entr
  * TODO(P3): Implement this method.
  */
 auto GenerateSortKey(const Tuple &tuple, const std::vector<OrderBy> &order_bys, const Schema &schema) -> SortKey {
-  return {};
+  std::vector<Value> sort_keys{};
+  sort_keys.reserve(order_bys.size());
+  for (auto &order_by : order_bys) {
+    sort_keys.emplace_back(order_by.second->Evaluate(&tuple, schema));
+  }
+  return sort_keys;
 }
 
 /**

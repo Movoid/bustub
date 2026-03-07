@@ -23,12 +23,16 @@ namespace bustub {
  */
 LimitExecutor::LimitExecutor(ExecutorContext *exec_ctx, const LimitPlanNode *plan,
                              std::unique_ptr<AbstractExecutor> &&child_executor)
-    : AbstractExecutor(exec_ctx) {
-  UNIMPLEMENTED("TODO(P3): Add implementation.");
+    : AbstractExecutor{exec_ctx}, plan_{plan}, to_child_executor_{std::move(child_executor)} {
+  // UNIMPLEMENTED("TODO(P3): Add implementation.");
 }
 
 /** Initialize the limit */
-void LimitExecutor::Init() { UNIMPLEMENTED("TODO(P3): Add implementation."); }
+void LimitExecutor::Init() {
+  // UNIMPLEMENTED("TODO(P3): Add implementation.");
+  to_child_executor_->Init();
+  count_ = 0;
+}
 
 /**
  * Yield the next tuple from the limit.
@@ -36,6 +40,24 @@ void LimitExecutor::Init() { UNIMPLEMENTED("TODO(P3): Add implementation."); }
  * @param[out] rid The next tuple RID produced by the limit
  * @return `true` if a tuple was produced, `false` if there are no more tuples
  */
-auto LimitExecutor::Next(Tuple *tuple, RID *rid) -> bool { UNIMPLEMENTED("TODO(P3): Add implementation."); }
+auto LimitExecutor::Next(Tuple *tuple, RID *rid) -> bool {
+  // UNIMPLEMENTED("TODO(P3): Add implementation.");
+  if (count_ == plan_->GetLimit()) {
+    return false;
+  }
+
+  Tuple cur_tuple{};
+  RID cur_rid{};
+
+  auto status{to_child_executor_->Next(&cur_tuple, &cur_rid)};
+  if (!status) {
+    return false;
+  }
+
+  *tuple = cur_tuple;
+  *rid = cur_rid;
+  count_++;
+  return true;
+}
 
 }  // namespace bustub

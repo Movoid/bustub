@@ -75,6 +75,8 @@ class Tuple {
 
   /**
    * 使用 Value 数组与匹配的 Schema 来构造 Tuple.
+   * 主要的构造方法, 将 Value 按 Schema 序列化到了 Tuple 上.
+   * Tuple 可以被直接序列化到 Page 上.
    */
   Tuple(std::vector<Value> values, const Schema *schema);
 

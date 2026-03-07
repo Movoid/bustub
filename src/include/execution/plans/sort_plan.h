@@ -51,6 +51,9 @@ class SortPlanNode : public AbstractPlanNode {
 
   BUSTUB_PLAN_NODE_CLONE_WITH_CHILDREN(SortPlanNode);
 
+  /**
+   * `OrderBy`
+   */
   std::vector<OrderBy> order_bys_;
 
  protected:

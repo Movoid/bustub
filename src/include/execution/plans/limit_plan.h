@@ -15,6 +15,7 @@
 #include <string>
 #include <utility>
 
+#include "execution/executors/abstract_executor.h"
 #include "execution/plans/abstract_plan.h"
 #include "fmt/format.h"
 
