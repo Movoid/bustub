@@ -24,8 +24,8 @@ namespace bustub {
  *
  * 注意这里只有一个 Child.
  */
-NestedIndexJoinExecutor::NestedIndexJoinExecutor(ExecutorContext *exec_ctx, const NestedIndexJoinPlanNode *plan,
-                                                 std::unique_ptr<AbstractExecutor> &&child_executor)
+NestIndexJoinExecutor::NestIndexJoinExecutor(ExecutorContext *exec_ctx, const NestedIndexJoinPlanNode *plan,
+                                             std::unique_ptr<AbstractExecutor> &&child_executor)
     : AbstractExecutor{exec_ctx}, to_plan_{plan}, to_outer_executor_{std::move(child_executor)} {
   if (!(plan->GetJoinType() == JoinType::LEFT || plan->GetJoinType() == JoinType::INNER)) {  // NOLINT
     // Note for Spring 2025: You ONLY need to implement left join and inner join.
@@ -34,7 +34,7 @@ NestedIndexJoinExecutor::NestedIndexJoinExecutor(ExecutorContext *exec_ctx, cons
   // UNIMPLEMENTED("TODO(P3): Add implementation.");
 }
 
-void NestedIndexJoinExecutor::Init() {
+void NestIndexJoinExecutor::Init() {
   // UNIMPLEMENTED("TODO(P3): Add implementation.");
 
   rids_.clear();
@@ -52,7 +52,7 @@ void NestedIndexJoinExecutor::Init() {
   BUSTUB_ASSERT(to_real_index_ != nullptr, "Unsupported index type.");
 }
 
-auto NestedIndexJoinExecutor::Next(Tuple *tuple, RID *rid) -> bool {
+auto NestIndexJoinExecutor::Next(Tuple *tuple, RID *rid) -> bool {
   // UNIMPLEMENTED("TODO(P3): Add implementation.");
   if (is_consumed_) {
     return false;

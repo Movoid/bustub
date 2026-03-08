@@ -24,10 +24,10 @@ namespace bustub {
 /**
  * NestedIndexJoinExecutor executes index join operations.
  */
-class NestedIndexJoinExecutor : public AbstractExecutor {
+class NestIndexJoinExecutor : public AbstractExecutor {
  public:
-  NestedIndexJoinExecutor(ExecutorContext *exec_ctx, const NestedIndexJoinPlanNode *plan,
-                          std::unique_ptr<AbstractExecutor> &&child_executor);
+  NestIndexJoinExecutor(ExecutorContext *exec_ctx, const NestedIndexJoinPlanNode *plan,
+                        std::unique_ptr<AbstractExecutor> &&child_executor);
 
   /** @return The output schema for the nested index join */
   auto GetOutputSchema() const -> const Schema & override { return to_plan_->OutputSchema(); }

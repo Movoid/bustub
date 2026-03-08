@@ -130,7 +130,7 @@ auto ExecutorFactory::CreateExecutor(ExecutorContext *exec_ctx, const AbstractPl
     case PlanType::NestedIndexJoin: {
       auto nested_index_join_plan = dynamic_cast<const NestedIndexJoinPlanNode *>(plan.get());
       auto left = ExecutorFactory::CreateExecutor(exec_ctx, nested_index_join_plan->GetChildPlan());
-      return std::make_unique<NestedIndexJoinExecutor>(exec_ctx, nested_index_join_plan, std::move(left));
+      return std::make_unique<NestIndexJoinExecutor>(exec_ctx, nested_index_join_plan, std::move(left));
     }
 
     // Create a new hash join executor
