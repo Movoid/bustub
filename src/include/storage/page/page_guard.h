@@ -74,7 +74,7 @@ class ReadPageGuard {
                          std::shared_ptr<ShardingLRUKReplacer> replacer);
 
   /** @brief The page ID of the page we are guarding. */
-  page_id_t page_id_;
+  page_id_t page_id_{INVALID_PAGE_ID};
 
   /**
    * @brief The frame that holds the page this guard is protecting.
