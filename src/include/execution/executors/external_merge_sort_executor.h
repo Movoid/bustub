@@ -110,17 +110,22 @@ class MergeSortRun {
     auto operator++() -> Iterator & {
       BUSTUB_ASSERT(next_page_pos_ < static_cast<uint32_t>(to_run_->pages_.size()), "Unexpected.");
       auto to_sortpage{page_g_.As<SortPage>()};
+      cur_tuple_.reset();
       next_in_page_slot_pos_++;
 
-      if (next_in_page_slot_pos_ == to_sortpage->GetSize()) {
-        next_in_page_slot_pos_ = 0;
-        next_page_pos_++;
+      if (next_in_page_slot_pos_ < to_sortpage->GetSize()) {
+        return *this;
       }
+
+      page_g_.Drop();
+      next_in_page_slot_pos_ = 0;
+      next_page_pos_++;
 
       if (next_page_pos_ == static_cast<uint32_t>(to_run_->pages_.size())) {
         next_in_page_slot_pos_ = UINT32_MAX;
         next_page_pos_ = UINT32_MAX;
         page_g_.Drop();
+        cur_tuple_.reset();
         return *this;
       }
 
@@ -131,10 +136,12 @@ class MergeSortRun {
     }
 
     auto operator*() -> Tuple {
-      auto to_sortpage{page_g_.As<SortPage>()};
-      Tuple ret{};
-      ret.DeserializeFrom(to_sortpage->GetSlot(next_in_page_slot_pos_));
-      return ret;
+      if (!cur_tuple_.has_value()) {
+        auto to_sortpage{page_g_.As<SortPage>()};
+        cur_tuple_ = Tuple{};
+        cur_tuple_.value().DeserializeFrom(to_sortpage->GetSlot(next_in_page_slot_pos_));
+      }
+      return cur_tuple_.value();
     }
 
     auto operator==(const Iterator &other) const -> bool {
@@ -156,6 +163,7 @@ class MergeSortRun {
     ReadPageGuard page_g_;
     uint32_t next_page_pos_{UINT32_MAX};
     uint32_t next_in_page_slot_pos_{UINT32_MAX};
+    std::optional<Tuple> cur_tuple_;
   };
 
   auto Begin() -> Iterator {
