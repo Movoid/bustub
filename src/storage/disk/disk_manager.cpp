@@ -77,6 +77,10 @@ DiskManager::~DiskManager() {
  * Shut down the disk manager and close all the file resources.
  */
 void DiskManager::ShutDown() {
+  /**
+   * 必须 Stop Scheduler.
+   */
+  ForceDiskSchedulerStopForDebugOnly();
   {
     std::scoped_lock scoped_db_io_latch(db_io_latch_);
     db_io_.close();
@@ -90,8 +94,9 @@ void DiskManager::RegisterDiskSchedulerForDebugOnly(std::shared_ptr<DiskSchedule
 }
 
 void DiskManager::ForceDiskSchedulerStopForDebugOnly() {
-  BUSTUB_ASSERT(to_active_disk_scheduler_ != nullptr, "Unexpected.");
-  to_active_disk_scheduler_->ForceStopForDebugOnly();
+  if (to_active_disk_scheduler_) {
+    to_active_disk_scheduler_->ForceStopForDebugOnly();
+  }
 }
 
 /**

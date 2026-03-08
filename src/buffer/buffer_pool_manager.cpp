@@ -197,16 +197,75 @@ void BufferPoolManager::FlushPageAsyncUnsafe(page_id_t page_id, char *src) {  //
  * @return The page ID of the newly allocated page.
  */
 auto BufferPoolManager::NewPage() -> page_id_t {
-  /**
-   * 必须调用 `DiskManager` 的 `WritePage`.
-   * 否则 `ReadPage` 报错 page not in range.
-   */
   page_id_t new_page_id{next_page_id_.fetch_add(1, std::memory_order_relaxed)};
 
-  char test_buf[BUSTUB_PAGE_SIZE]{};
-  FlushPageAsyncUnsafe(new_page_id, test_buf);
+  while (true) {
+    auto evicted{replacer_->SelectEvictAndPin()};
+    if (!evicted.has_value()) {
+      /**
+       * 驱逐失败, 退化到使用 `FlushPageAsyncUnsafe`.
+       */
+      char zero_page[BUSTUB_PAGE_SIZE]{};
+      FlushPageAsyncUnsafe(new_page_id, zero_page);
+      return new_page_id;
+    }
 
-  return new_page_id;
+    frame_id_t evicted_frame_id{evicted.value()};
+
+    {
+      std::lock_guard frame_lk{frames_[evicted_frame_id]->rwlatch_};
+      FrameHeader *to_evicted_frame{frames_[evicted_frame_id].get()};
+      BUSTUB_ASSERT(to_evicted_frame->page_id_ != INVALID_PAGE_ID || !to_evicted_frame->is_dirty_, "Unexpected.");
+
+      if (to_evicted_frame->page_id_ != INVALID_PAGE_ID) {
+        auto to_evicted_table_shard{page_table_.VisitShard(to_evicted_frame->page_id_)};
+
+        if (to_evicted_frame->is_dirty_) {
+          FlushPageAsyncUnsafe(to_evicted_frame->page_id_, to_evicted_frame->GetDataMut());
+          to_evicted_frame->is_dirty_ = false;
+        }
+
+        {
+          std::lock_guard evicted_map_lk{to_evicted_table_shard->m_};
+          if (!replacer_->TryCommitEvict(evicted_frame_id)) {
+            continue;
+          }
+          auto to_evicted_map{&to_evicted_table_shard->map_};
+          BUSTUB_ASSERT(to_evicted_map->count(to_evicted_frame->page_id_) == 1, "Unexpected.");
+          to_evicted_map->erase(to_evicted_frame->page_id_);
+        }
+      }
+
+      auto to_load_table_shard{page_table_.VisitShard(new_page_id)};
+      {
+        /**
+         * 无需检查是否有其他线程抢先 load 此 page.
+         * 此处 `NewPage()` 生成的 Page ID 是唯一的.
+         */
+        std::lock_guard lk{to_load_table_shard->m_};
+        auto to_load_map{&to_load_table_shard->map_};
+        auto iter{to_load_map->find(new_page_id)};
+        if (iter != to_load_map->end()) {
+          BUSTUB_ASSERT(false, "Unexpected.");
+        }
+        to_load_map->emplace(new_page_id, evicted_frame_id);
+      }
+
+      to_evicted_frame->Reset();
+      to_evicted_frame->page_id_ = new_page_id;
+
+      /**
+       * 必须设置 `is_dirty_ = true`.
+       * 此 `NewPage()` 得到的 frame 中承载的 page 数据从未被写盘.
+       *
+       * 不需要使用 PageGuard, 直接 `Unpin`.
+       */
+      to_evicted_frame->is_dirty_ = true;
+      replacer_->RecordAccess(evicted_frame_id);
+      replacer_->Unpin(evicted_frame_id);
+    }
+    return new_page_id;
+  }
 }
 
 /**
