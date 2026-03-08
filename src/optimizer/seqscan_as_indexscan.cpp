@@ -192,7 +192,7 @@ auto Optimizer::OptimizeSeqScanAsIndexScan(const bustub::AbstractPlanNodeRef &pl
   /**
    * 允许优化.
    */
-  BUSTUB_ASSERT(const_key_set.size() > 0, "Unexpected.");
+  BUSTUB_ASSERT(!const_key_set.empty(), "Unexpected.");
   BUSTUB_ASSERT(use_col_idx != UINT32_MAX, "Unexpected.");
   std::vector<AbstractExpressionRef> const_keys{};
   const_keys.resize(const_key_set.size());

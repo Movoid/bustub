@@ -129,7 +129,7 @@ auto Optimizer::OptimizeNLJAsHashJoin(const AbstractPlanNodeRef &plan) -> Abstra
         is_failed = true;
         break;
       }
-      BUSTUB_ASSERT(to_cur_logic_expr->GetChildren().size(), "Unexpected.");
+      BUSTUB_ASSERT(!to_cur_logic_expr->GetChildren().empty(), "Unexpected.");
       callstack.emplace(to_cur_logic_expr->GetChildAt(0), false);
       callstack.emplace(to_cur_logic_expr->GetChildAt(1), false);
     } else if (auto to_cur_cmp_expr{dynamic_cast<ComparisonExpression *>(cur_expr.get())}; to_cur_cmp_expr != nullptr) {
