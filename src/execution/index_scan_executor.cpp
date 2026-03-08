@@ -36,7 +36,7 @@ void IndexScanExecutor::Init() {
   next_rid_pos_ = 0;
   to_iter_.reset();
 
-  to_table_info_ = exec_ctx_->GetCatalog()->GetTable(to_plan_->GetTableOid()).get();
+  to_table_info_ = exec_ctx_->GetCatalog()->GetTable(to_plan_->table_oid_).get();
   auto to_index{exec_ctx_->GetCatalog()->GetIndex(to_plan_->GetIndexOid())->index_.get()};
   to_real_index_ = dynamic_cast<BPlusTreeIndexForTwoIntegerColumn *>(to_index);
 

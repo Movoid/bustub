@@ -47,8 +47,6 @@ class IndexScanPlanNode : public AbstractPlanNode {
   /** @return the identifier of the table that should be scanned */
   auto GetIndexOid() const -> index_oid_t { return index_oid_; }
 
-  auto GetTableOid() const -> table_oid_t { return table_oid_; }
-
   BUSTUB_PLAN_NODE_CLONE_WITH_CHILDREN(IndexScanPlanNode);
 
   /** The table which the index is created on. */
