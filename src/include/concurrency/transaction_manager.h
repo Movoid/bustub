@@ -64,6 +64,11 @@ class TransactionManager {
   /** All transactions, running or committed */
   std::unordered_map<txn_id_t, std::shared_ptr<Transaction>> txn_map_;
 
+  /**
+   * 每个事务有自己的 `undo_logs_`, 记录 UndoLog.
+   * UndoLink 指向这些 UndoLog .
+   * 通过 UndoLog 中的 UndoLink 继续回溯, 可以得到数据旧版本.
+   */
   struct PageVersionInfo {
     /** protects the map */
     std::shared_mutex mutex_;
@@ -95,6 +100,10 @@ class TransactionManager {
   /** Catalog */
   Catalog *catalog_;
 
+  /**
+   * Transaction 的 `GetTransactionTempTs()` 会返回其 Txn ID.
+   * Txn ID 是一个从 `TXN_START_ID` 开始的值, 应该大于所有正常 Timestamp.
+   */
   std::atomic<txn_id_t> next_txn_id_{TXN_START_ID};
 
  private:

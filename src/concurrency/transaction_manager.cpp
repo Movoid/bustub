@@ -89,8 +89,6 @@ auto TransactionManager::Commit(Transaction *to_txn) -> bool {
 
   std::unique_lock<std::shared_mutex> lck(txn_map_mutex_);
 
-  // TODO(fall2023): set commit timestamp + update last committed timestamp here.
-
   to_txn->commit_ts_.store(commit_ts, std::memory_order_relaxed);
   auto old_commit_ts{last_commit_ts_.fetch_add(1, std::memory_order_relaxed)};
   BUSTUB_ASSERT(old_commit_ts + 1 == commit_ts, "Unexpected.");

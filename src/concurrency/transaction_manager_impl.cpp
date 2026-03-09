@@ -124,7 +124,10 @@ void Transaction::SetTainted() {
 }
 
 /**
- * @brief Update the tuple and its undo link in the table heap atomically.
+ * @brief Update the tuple and its undo link in the table heap **atomically**.
+ *
+ * bustub 将 TableHeap 上的 Tuple 更新, 和 Txn Manager 的 Undo Link 更新做成了原子的。
+ * 在当前 Undo Log 设计中, 这是必须的要求.
  */
 auto UpdateTupleAndUndoLink(
     TransactionManager *txn_mgr, RID rid, std::optional<UndoLink> undo_link, TableHeap *table_heap, Transaction *txn,

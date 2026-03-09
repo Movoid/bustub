@@ -12,6 +12,8 @@
 
 #include "execution/executors/seq_scan_executor.h"
 #include "common/macros.h"
+#include "concurrency/transaction_manager.h"
+#include "execution/execution_common.h"
 
 namespace bustub {
 
@@ -46,17 +48,34 @@ auto SeqScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
    */
 
   while (true) {
-    while (!to_iter_->IsEnd() && to_iter_->GetTuple().first.is_deleted_) {
-      ++(*to_iter_);
-    }
-
     if (to_iter_->IsEnd()) {
       return false;
     }
 
-    const auto [cur_meta, cur_tuple]{to_iter_->GetTuple()};
-    BUSTUB_ASSERT(!(cur_tuple.GetRid() == RID{INVALID_PAGE_ID, 0}), "Invalid RID.");
+    auto [cur_meta, cur_tuple]{to_iter_->GetTuple()};
+    const auto cur_rid{cur_tuple.GetRid()};
+    BUSTUB_ASSERT(!(cur_rid == RID{INVALID_PAGE_ID, 0}), "Invalid RID.");
     ++(*to_iter_);
+
+    /**
+     * MVCC.
+     */
+    auto to_txn_mgr{exec_ctx_->GetTransactionManager()};
+    std::optional<UndoLink> undo_link{};
+    {
+      std::shared_lock txn_map_lk{to_txn_mgr->txn_map_mutex_};
+      undo_link = to_txn_mgr->GetUndoLink(cur_rid);
+    }
+    auto undo_logs{CollectUndoLogs(cur_rid, cur_meta, cur_tuple, undo_link, exec_ctx_->GetTransaction(), to_txn_mgr)};
+    if (!undo_logs.has_value()) {
+      continue;
+    }
+    auto undone_tuple{ReconstructTuple(&to_table_info_->schema_, cur_tuple, cur_meta, undo_logs.value())};
+    if (!undone_tuple.has_value()) {
+      continue;
+    }
+    cur_tuple = std::move(undone_tuple.value());
+
     /**
      * 使用 Plan 中的, 通过谓词下推获得的 `filter_predicate_` 来过滤.
      */

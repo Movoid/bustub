@@ -53,7 +53,11 @@ class Catalog;
 using table_oid_t = uint32_t;
 using index_oid_t = uint32_t;
 
-/** Represents a link to a previous version of this tuple */
+/**
+ * Represents a link to a previous version of this tuple
+ *
+ * 指向 `prev_txn_` Txn 的 `undo_logs_` 的第 `prev_log_idx_` 项.
+ */
 struct UndoLink {
   /* Previous version can be found in which txn */
   txn_id_t prev_txn_{INVALID_TXN_ID};
@@ -70,6 +74,10 @@ struct UndoLink {
   auto IsValid() const -> bool { return prev_txn_ != INVALID_TXN_ID; }
 };
 
+/**
+ * `modified_fields_` 标记一个 Tuple 被修改的 Column idx.
+ * `tuple_` 是这些 Column **变更前** 的取值.
+ */
 struct UndoLog {
   /* Whether this log is a deletion marker */
   bool is_deleted_;

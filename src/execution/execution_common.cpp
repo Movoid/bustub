@@ -89,9 +89,44 @@ auto GenerateSortKey(const Tuple &tuple, const std::vector<OrderBy> &order_bys, 
  * @return An optional tuple that represents the reconstructed tuple. If the tuple is deleted as the result, returns
  * std::nullopt.
  */
-auto ReconstructTuple(const Schema *schema, const Tuple &base_tuple, const TupleMeta &base_meta,
+auto ReconstructTuple(const Schema *to_schema, const Tuple &base_tuple, const TupleMeta &base_meta,
                       const std::vector<UndoLog> &undo_logs) -> std::optional<Tuple> {
-  UNIMPLEMENTED("not implemented");
+  // UNIMPLEMENTED("not implemented");
+
+  if (undo_logs.empty()) {
+    if (base_meta.is_deleted_) {
+      return std::nullopt;
+    }
+    return base_tuple;
+  }
+
+  std::vector<Value> values{};
+  values.reserve(to_schema->GetColumnCount());
+  for (uint32_t i = 0; i < to_schema->GetColumnCount(); i++) {
+    values.emplace_back(base_tuple.GetValue(to_schema, i));
+  }
+
+  bool is_deleted{base_meta.is_deleted_};
+  std::vector<uint32_t> attrs{};
+  attrs.reserve(to_schema->GetColumnCount());
+  for (const auto &undo_log : undo_logs) {
+    for (size_t i = 0; i < undo_log.modified_fields_.size(); i++) {
+      if (undo_log.modified_fields_[i]) {
+        attrs.emplace_back(i);
+      }
+    }
+    auto delta_schema{Schema::CopySchema(to_schema, attrs)};
+    for (uint32_t i = 0; i < attrs.size(); i++) {
+      values[attrs[i]] = undo_log.tuple_.GetValue(&delta_schema, i);
+    }
+    is_deleted = undo_log.is_deleted_;
+    attrs.clear();
+  }
+
+  if (is_deleted) {
+    return std::nullopt;
+  }
+  return Tuple{std::move(values), to_schema};
 }
 
 /**
@@ -105,10 +140,73 @@ auto ReconstructTuple(const Schema *schema, const Tuple &base_tuple, const Tuple
  * @param txn_mgr The transaction manager.
  * @return An optional vector of undo logs to pass to ReconstructTuple(). std::nullopt if the tuple did not exist at the
  * time.
+ *
+ * 注意对于当前事务, 此 Tuple 可能不存在.
  */
 auto CollectUndoLogs(RID rid, const TupleMeta &base_meta, const Tuple &base_tuple, std::optional<UndoLink> undo_link,
-                     Transaction *txn, TransactionManager *txn_mgr) -> std::optional<std::vector<UndoLog>> {
-  UNIMPLEMENTED("not implemented");
+                     Transaction *to_txn, TransactionManager *to_txn_mgr) -> std::optional<std::vector<UndoLog>> {
+  // UNIMPLEMENTED("not implemented");
+  auto read_ts{to_txn->GetReadTs()};
+
+  if (base_meta.ts_ <= read_ts) {
+    return std::vector<UndoLog>{};
+  }
+
+  /**
+   * 未提交的事务会先构造 Undo Log, 再修改 TableHeap .
+   * 未提交的版本有取值超大的临时 timestamp.
+   *
+   * 只有 TableHeap 中的 Tuple 可能有临时 timestamp.
+   * Undo Log 不可能有临时 timestamp, 若允许则实际发生了脏写.
+   */
+
+  /**
+   * 事务应该能读取自己的未提交写结果.
+   */
+
+  if (base_meta.ts_ == to_txn->GetTransactionTempTs()) {
+    return std::vector<UndoLog>{};
+  }
+
+  if (!undo_link.has_value()) {
+    /**
+     * Txn Manager 没有 Undo Link, 同时 `base_meta.ts_ > read_ts`,
+     * 则这个 Tuple 是未来插入的.
+     */
+    return std::nullopt;
+  }
+
+  std::vector<UndoLog> needed_undo_logs{};
+
+  BUSTUB_ASSERT(undo_link.has_value(), "Unexpected.");
+  auto cur_undo_link{undo_link.value()};
+  while (cur_undo_link.IsValid()) {
+    BUSTUB_ASSERT(cur_undo_link.IsValid(), "Unexpected.");
+    std::shared_ptr<Transaction> to_cur_txn{};
+    {
+      std::shared_lock txn_map_lk{to_txn_mgr->txn_map_mutex_};
+      BUSTUB_ASSERT(to_txn_mgr->txn_map_.count(cur_undo_link.prev_txn_), "Unexpected.");
+      to_cur_txn = to_txn_mgr->txn_map_[cur_undo_link.prev_txn_];
+    }
+
+    auto to_undo_log{to_cur_txn->GetUndoLog(cur_undo_link.prev_log_idx_)};
+    needed_undo_logs.emplace_back(std::move(to_undo_log));
+    if (needed_undo_logs.back().ts_ <= read_ts) {
+      break;
+    }
+    cur_undo_link = to_undo_log.prev_version_;
+  }
+
+  if (!cur_undo_link.IsValid()) {
+    /**
+     * 无法回溯到当前 `read_ts` 之前的版本.
+     * 此 Tuple 不存在.
+     */
+    return std::nullopt;
+  }
+
+  BUSTUB_ASSERT(needed_undo_logs.back().ts_ <= read_ts, "Unexpected.");
+  return needed_undo_logs;
 }
 
 /**
