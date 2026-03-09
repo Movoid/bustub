@@ -22,6 +22,12 @@ namespace bustub {
 /**
  * @brief tracks all the read timestamps.
  *
+ * Watermark 是当前所有运行中 (未 Commit/Abort) 的事务中,
+ * `read_ts_` 的最小值.
+ * 没有事务运行则返回被 `UpdateCommitTs()` 跟踪的 `last_commit_ts_`.
+ *
+ * Watermark 永远单调递增,
+ * 单调遍历 hashmap 实现均摊 O(1).
  */
 class Watermark {
  public:
@@ -36,7 +42,7 @@ class Watermark {
   auto UpdateCommitTs(timestamp_t commit_ts) { commit_ts_ = commit_ts; }
 
   auto GetWatermark() -> timestamp_t {
-    if (current_reads_.empty()) {
+    if (active_txn_count_on_readts_.empty()) {
       return commit_ts_;
     }
     return watermark_;
@@ -46,7 +52,7 @@ class Watermark {
 
   timestamp_t watermark_;
 
-  std::unordered_map<timestamp_t, int> current_reads_;
+  std::unordered_map<timestamp_t, int> active_txn_count_on_readts_;
 };
 
 };  // namespace bustub

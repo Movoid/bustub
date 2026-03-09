@@ -42,15 +42,16 @@ namespace bustub {
  */
 auto TransactionManager::Begin(IsolationLevel isolation_level) -> Transaction * {
   std::unique_lock<std::shared_mutex> l(txn_map_mutex_);
-  auto txn_id = next_txn_id_++;
-  auto txn = std::make_unique<Transaction>(txn_id, isolation_level);
-  auto *txn_ref = txn.get();
-  txn_map_.insert(std::make_pair(txn_id, std::move(txn)));
+  auto txn_id = next_txn_id_.fetch_add(1, std::memory_order_relaxed);
+  auto to_txn_uniq = std::make_unique<Transaction>(txn_id, isolation_level);
+  auto *to_txn = to_txn_uniq.get();
+  txn_map_.insert(std::make_pair(txn_id, std::move(to_txn_uniq)));
 
-  // TODO(fall2023): set the timestamps here. Watermark updated below.
+  auto start_ts{last_commit_ts_.load(std::memory_order_relaxed)};
+  to_txn->read_ts_.store(start_ts, std::memory_order_relaxed);
+  running_txns_.AddTxn(to_txn->read_ts_);
 
-  running_txns_.AddTxn(txn_ref->read_ts_);
-  return txn_ref;
+  return to_txn;
 }
 
 /** @brief Verify if a txn satisfies serializability. We will not test this function and you can change / remove it as
@@ -62,32 +63,41 @@ auto TransactionManager::VerifyTxn(Transaction *txn) -> bool { return true; }
  * @param txn the transaction to commit, the txn will be managed by the txn manager so no need to delete it by
  * yourself
  */
-auto TransactionManager::Commit(Transaction *txn) -> bool {
+auto TransactionManager::Commit(Transaction *to_txn) -> bool {
   std::unique_lock<std::mutex> commit_lck(commit_mutex_);
 
   // TODO(fall2023): acquire commit ts!
+  auto commit_ts{last_commit_ts_.load(std::memory_order_relaxed) + 1};
 
-  if (txn->state_ != TransactionState::RUNNING) {
+  if (to_txn->state_ != TransactionState::RUNNING) {
     throw Exception("txn not in running state");
   }
 
-  if (txn->GetIsolationLevel() == IsolationLevel::SERIALIZABLE) {
-    if (!VerifyTxn(txn)) {
+  if (to_txn->GetIsolationLevel() == IsolationLevel::SERIALIZABLE) {
+    if (!VerifyTxn(to_txn)) {
       commit_lck.unlock();
-      Abort(txn);
+      Abort(to_txn);
       return false;
     }
   }
 
   // TODO(fall2023): Implement the commit logic!
 
+  /**
+   * 待完成.
+   */
+
   std::unique_lock<std::shared_mutex> lck(txn_map_mutex_);
 
   // TODO(fall2023): set commit timestamp + update last committed timestamp here.
 
-  txn->state_ = TransactionState::COMMITTED;
-  running_txns_.UpdateCommitTs(txn->commit_ts_);
-  running_txns_.RemoveTxn(txn->read_ts_);
+  to_txn->commit_ts_.store(commit_ts, std::memory_order_relaxed);
+  auto old_commit_ts{last_commit_ts_.fetch_add(1, std::memory_order_relaxed)};
+  BUSTUB_ASSERT(old_commit_ts + 1 == commit_ts, "Unexpected.");
+
+  to_txn->state_ = TransactionState::COMMITTED;
+  running_txns_.UpdateCommitTs(to_txn->commit_ts_);
+  running_txns_.RemoveTxn(to_txn->read_ts_);
 
   return true;
 }

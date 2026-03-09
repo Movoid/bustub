@@ -82,7 +82,12 @@ class TransactionManager {
   /** Stores all the read_ts of running txns so as to facilitate garbage collection. */
   Watermark running_txns_{0};
 
-  /** Only one txn is allowed to commit at a time */
+  /**
+   * Only one txn is allowed to commit at a time
+   *
+   * 保证只有一个事务能进入 Commit 流程,
+   * 流程中, `last_commit_ts_` 不会被其他事务修改.
+   */
   std::mutex commit_mutex_;
   /** The last committed timestamp. */
   std::atomic<timestamp_t> last_commit_ts_{0};
