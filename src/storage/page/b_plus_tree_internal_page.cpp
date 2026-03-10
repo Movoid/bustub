@@ -107,7 +107,15 @@ void B_PLUS_TREE_INTERNAL_PAGE_TYPE::SetLowKey(const KeyType &low_key) {
  * 只有最右侧的节点允许 `high_key_` invalid,
  * 被 Merge 操作清空的节点不允许设置 invalid.
  *
- * 考虑空的 Internal Node,
+ * inclusive upperbound, 以及 `lowerbound_idx - 1` 的设计是为了尝试支持重复 key.
+ * 考虑有多个充满相同 key 的 kv 的 LeafNode, 且任何一个都没有开始 BackfixInsertKv,
+ * 这会让搜索 key 的操作被路由到严格小于 key 的区间.
+ *
+ * > 绝不能直接使用 `lowerbound_idx` 进行路由.
+ * > 因为上述的 LeafNode 执行 BackfixInsertKv 后,
+ * > 他们的 kv 在 parent 中的顺序没有任何保证.
+ * > 要搜索 key, 必须从严格小于 key 的位置开始搜索,
+ * > 因为 Sibling Link 的顺序是准确的.
  */
 INDEX_TEMPLATE_ARGUMENTS
 auto B_PLUS_TREE_INTERNAL_PAGE_TYPE::CoveredKey(const KeyType &key, KeyComparator &cmp) const -> bool {
