@@ -12,6 +12,7 @@
 
 #include <memory>
 #include "common/macros.h"
+#include "concurrency/transaction_manager.h"
 
 #include "execution/executors/insert_executor.h"
 
@@ -59,6 +60,8 @@ auto InsertExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool {
     return false;
   }
 
+  auto to_txn{exec_ctx_->GetTransaction()};
+
   const auto to_all_index_info{exec_ctx_->GetCatalog()->GetTableIndexes(to_table_info_->name_)};
 
   BUSTUB_ASSERT(to_table_info_->schema_.GetColumnCount() == to_child_executor_->GetOutputSchema().GetColumnCount(),
@@ -72,10 +75,17 @@ auto InsertExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool {
      * 插入新 Tuple.
      */
     auto &to_table{to_table_info_->table_};
-    TupleMeta insert_meta{0, false};
+    TupleMeta insert_meta{to_txn->GetTransactionTempTs(), false};
     auto insert_rid_opt{to_table->InsertTuple(insert_meta, cur_tuple)};
     BUSTUB_ASSERT(insert_rid_opt.has_value(), "Unexepcted fail.");
     auto insert_rid{insert_rid_opt.value()};
+
+    /**
+     * MVCC.
+     * 元组从不存在变为存在. 没有 Undo Log.
+     * 需要设置临时 timestamp.
+     */
+    to_txn->AppendWriteSet(to_plan_->GetTableOid(), insert_rid);
 
     /**
      * 插入新 Index Entry.

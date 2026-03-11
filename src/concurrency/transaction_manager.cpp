@@ -82,10 +82,20 @@ auto TransactionManager::Commit(Transaction *to_txn) -> bool {
   }
 
   // TODO(fall2023): Implement the commit logic!
-
   /**
-   * 待完成.
+   * 通过 WriteSet 追踪被修改的元组,
+   * 修改 timestamp.
    */
+  for (const auto &table_write_set : to_txn->GetWriteSets()) {
+    auto table_oid{table_write_set.first};
+    auto &to_table{catalog_->GetTable(table_oid)->table_};
+    for (const auto &rid : table_write_set.second) {
+      auto tuple_meta{to_table->GetTupleMeta(rid)};
+      BUSTUB_ASSERT(tuple_meta.ts_ == to_txn->GetTransactionTempTs(), "Unexpected.");
+      tuple_meta.ts_ = commit_ts;
+      to_table->UpdateTupleMeta(tuple_meta, rid);
+    }
+  }
 
   std::unique_lock<std::shared_mutex> lck(txn_map_mutex_);
 

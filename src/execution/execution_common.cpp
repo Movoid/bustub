@@ -88,6 +88,9 @@ auto GenerateSortKey(const Tuple &tuple, const std::vector<OrderBy> &order_bys, 
  * @param undo_logs The list of undo logs to apply during the reconstruction, the front is applied first.
  * @return An optional tuple that represents the reconstructed tuple. If the tuple is deleted as the result, returns
  * std::nullopt.
+ *
+ * 遇到 `is_deleted_` UndoLog, 仍需要应用 `tuple_` 中的变更,
+ * 才能回溯到更早的版本.
  */
 auto ReconstructTuple(const Schema *to_schema, const Tuple &base_tuple, const TupleMeta &base_meta,
                       const std::vector<UndoLog> &undo_logs) -> std::optional<Tuple> {
@@ -126,7 +129,10 @@ auto ReconstructTuple(const Schema *to_schema, const Tuple &base_tuple, const Tu
   if (is_deleted) {
     return std::nullopt;
   }
-  return Tuple{std::move(values), to_schema};
+
+  Tuple undone_tuple{std::move(values), to_schema};
+  undone_tuple.SetRid(base_tuple.GetRid());
+  return undone_tuple;
 }
 
 /**
@@ -161,7 +167,8 @@ auto CollectUndoLogs(RID rid, const TupleMeta &base_meta, const Tuple &base_tupl
    */
 
   /**
-   * 事务应该能读取自己的未提交写结果.
+   * 未提交的版本只有其对应的事务能读取.
+   * 其他事务都不可读取.
    */
 
   if (base_meta.ts_ == to_txn->GetTransactionTempTs()) {
@@ -210,6 +217,15 @@ auto CollectUndoLogs(RID rid, const TupleMeta &base_meta, const Tuple &base_tupl
 }
 
 /**
+ * 两个工具, 不操作 txn 本身.
+ * 事务第一次修改某 Tuple, 使用 GenerateNewUndoLog, 仅对比两个 tuple 并生成 Undo Log.
+ * 事务非第一次修改, 使用 GenerateUpdatedUndoLog.
+ *
+ * > 注意, bustub 要求 `GenerateUpdateUndoLog()` 不允许撤销 UndoLog 中的修改记录.
+ * > 就算事务撤销了自己上一次的修改, 也要记录在 UndoLog. (?)
+ */
+
+/**
  * @brief Generates a new undo log as the transaction tries to modify this tuple at the first time.
  *
  * @param schema The schema of the table.
@@ -222,7 +238,50 @@ auto CollectUndoLogs(RID rid, const TupleMeta &base_meta, const Tuple &base_tupl
  */
 auto GenerateNewUndoLog(const Schema *schema, const Tuple *base_tuple, const Tuple *target_tuple, timestamp_t ts,
                         UndoLink prev_version) -> UndoLog {
-  UNIMPLEMENTED("not implemented");
+  // UNIMPLEMENTED("not implemented");
+
+  if (base_tuple == nullptr) {
+    /**
+     * Insert 操作.
+     * RID 复用?
+     */
+    BUSTUB_ASSERT(target_tuple != nullptr, "Unexpected.");
+    return UndoLog{true, {}, {}, ts, prev_version};
+  }
+
+  if (target_tuple == nullptr) {
+    /**
+     * Delete 操作.
+     * 把 `base_tuple` 整个保存, 才能从空白恢复到 Delete 前的版本.
+     */
+    BUSTUB_ASSERT(base_tuple != nullptr, "Unexpected.");
+    std::vector<bool> modified_flag(schema->GetColumnCount(), true);
+    return UndoLog{false, std::move(modified_flag), {*base_tuple}, ts, prev_version};
+  }
+
+  std::vector<uint32_t> attrs{};
+  std::vector<Value> base_values{};
+  std::vector<bool> modified_flag{};
+  attrs.reserve(schema->GetColumnCount());
+  base_values.reserve(schema->GetColumnCount());
+  modified_flag.resize(schema->GetColumnCount());
+
+  for (uint32_t col_idx = 0; col_idx < schema->GetColumnCount(); col_idx++) {
+    Value base{base_tuple->GetValue(schema, col_idx)};
+    Value target{target_tuple->GetValue(schema, col_idx)};
+    BUSTUB_ASSERT(base.CheckComparable(target), "Unexpected.");
+    /**
+     * 前后都为 NULL 则应被视为不变.
+     */
+    if (!base.CompareExactlyEquals(target)) {
+      attrs.emplace_back(col_idx);
+      base_values.emplace_back(std::move(base));
+      modified_flag[col_idx] = true;
+    }
+  }
+
+  auto delta_schema{Schema::CopySchema(schema, attrs)};
+  return UndoLog{false, std::move(modified_flag), {std::move(base_values), &delta_schema}, ts, prev_version};
 }
 
 /**
@@ -234,10 +293,82 @@ auto GenerateNewUndoLog(const Schema *schema, const Tuple *base_tuple, const Tup
  * @param target_tuple The target tuple after the update. nullptr if this is a deletion.
  * @param log The original undo log.
  * @return The updated undo log.
+ *
+ * `base_tuple` 应该已经是当前事务修改后的结果.
+ * `log` 必须存在.
+ *
+ * 事务多次修改同一个数据, 只应该生成 1 个 Undo Log.
+ *
+ * 考虑 RID 初始为 deleted tuple.
+ * 事务 insert 后, RID 存在 tuple, log 指向 deleted.
+ * 再 delete 后, RID 为 deleted tuple, log 指向 deleted.
  */
 auto GenerateUpdatedUndoLog(const Schema *schema, const Tuple *base_tuple, const Tuple *target_tuple,
                             const UndoLog &log) -> UndoLog {
-  UNIMPLEMENTED("not implemented");
+  // UNIMPLEMENTED("not implemented");
+
+  if (log.is_deleted_) {
+    return log;
+  }
+
+  if (base_tuple == nullptr) {
+    /**
+     * Insert.
+     * 当前 Tuple 不存在, 且 `log.is_deleted_ == false`,
+     * 则 `log` 中应该有其 delete 前的完整版本.
+     */
+    BUSTUB_ASSERT(target_tuple != nullptr, "Unexpected.");
+    return GenerateNewUndoLog(schema, &log.tuple_, target_tuple, log.ts_, log.prev_version_);
+  }
+
+  std::vector<uint32_t> log_attrs{};
+  log_attrs.reserve(schema->GetColumnCount());
+  for (uint32_t col_idx = 0; col_idx < schema->GetColumnCount(); col_idx++) {
+    if (log.modified_fields_[col_idx]) {
+      log_attrs.emplace_back(col_idx);
+    }
+  }
+  auto log_schema{Schema::CopySchema(schema, log_attrs)};
+
+  std::vector<Value> before_base_values{};
+  before_base_values.reserve(schema->GetColumnCount());
+  uint32_t log_col_idx{};
+  for (uint32_t col_idx = 0; col_idx < schema->GetColumnCount(); col_idx++) {
+    Value before_base{base_tuple->GetValue(schema, col_idx)};
+    if (log.modified_fields_[col_idx]) {
+      before_base = log.tuple_.GetValue(&log_schema, log_col_idx++);
+    }
+    before_base_values.emplace_back(std::move(before_base));
+  }
+
+  if (target_tuple == nullptr) {
+    /**
+     * Delete.
+     */
+    std::vector<bool> modified_flag(schema->GetColumnCount(), true);
+    return UndoLog{
+        false, std::move(modified_flag), {std::move(before_base_values), schema}, log.ts_, log.prev_version_};
+  }
+
+  std::vector<uint32_t> attrs{};
+  std::vector<Value> new_base_values{};
+  std::vector<bool> modified_flag{};
+  attrs.reserve(schema->GetColumnCount());
+  new_base_values.reserve(schema->GetColumnCount());
+  modified_flag.resize(schema->GetColumnCount());
+  for (uint32_t col_idx = 0; col_idx < schema->GetColumnCount(); col_idx++) {
+    if (!before_base_values[col_idx].CompareExactlyEquals(target_tuple->GetValue(schema, col_idx)) ||
+        log.modified_fields_[col_idx]) {  // bustub 的要求.
+      attrs.emplace_back(col_idx);
+      new_base_values.emplace_back(std::move(before_base_values[col_idx]));
+      modified_flag[col_idx] = true;
+    }
+  }
+
+  auto delta_schema{Schema::CopySchema(schema, attrs)};
+
+  return UndoLog{
+      false, std::move(modified_flag), {std::move(new_base_values), &delta_schema}, log.ts_, log.prev_version_};
 }
 
 void TxnMgrDbg(const std::string &info, TransactionManager *txn_mgr, const TableInfo *table_info,
