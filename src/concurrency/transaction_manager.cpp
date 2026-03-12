@@ -126,8 +126,95 @@ void TransactionManager::Abort(Transaction *txn) {
   running_txns_.RemoveTxn(txn->read_ts_);
 }
 
-/** @brief Stop-the-world garbage collection. Will be called only when all transactions are not accessing the table
- * heap. */
-void TransactionManager::GarbageCollection() { UNIMPLEMENTED("not implemented"); }
+/**
+ * @brief Stop-the-world garbage collection.
+ * Will be called only when all transactions are not accessing the table heap.
+ *
+ * user 保证所有事务暂停时, 通过命令 `\txn gc` 调用 GC.
+ * 若一个 Tuple 有版本的 ts <= watermark, 则这个版本之前的所有版本可被回收.
+ */
+void TransactionManager::GarbageCollection() {
+  // UNIMPLEMENTED("not implemented");
+  auto watermark{GetWatermark()};
+
+  /**
+   * 遍历所有 Table.
+   * 对存在仍可被访问的 Txn 进行标记.
+   * 若 Txn 没有可被访问的日志, 可直接从 TxnMap 删除.
+   * 不需要调整 UndoLink 断开链表, 正确的版本回溯不会解引用无效的 UndoLink.
+   */
+
+  std::unordered_map<txn_id_t, bool> cannot_delete{};
+
+  auto table_names{catalog_->GetTableNames()};
+
+  for (const auto &table_name : table_names) {
+    auto to_table_info{catalog_->GetTable(table_name)};
+    auto &to_table{to_table_info->table_};
+
+    auto table_iter{to_table->MakeEagerIterator()};
+
+    while (!table_iter.IsEnd()) {
+      auto cur_rid{table_iter.GetRID()};
+      /**
+       * Check if have UndoLog.
+       */
+      BUSTUB_ASSERT(cur_rid.GetPageId() != INVALID_PAGE_ID, "Unexpected.");
+      auto page_version_info_iter{version_info_.find(cur_rid.GetPageId())};
+      if (page_version_info_iter == version_info_.end()) {
+        ++table_iter;
+        continue;
+      }
+      auto &page_version_info{page_version_info_iter->second};
+
+      auto prev_link_iter{page_version_info->prev_link_.find(cur_rid.GetSlotNum())};
+      if (prev_link_iter == page_version_info->prev_link_.end()) {
+        ++table_iter;
+        continue;
+      }
+
+      /**
+       * Start GC.
+       */
+      auto cur_undo_link{prev_link_iter->second};
+      auto [cur_tuple, cur_meta]{table_iter.GetTuple()};
+      if (cur_tuple.ts_ <= watermark) {
+        ++table_iter;
+        continue;
+      }
+
+      while (cur_undo_link.IsValid()) {
+        BUSTUB_ASSERT(txn_map_.count(cur_undo_link.prev_txn_), "Unexpected.");
+        const auto &cur_undo_log{txn_map_[cur_undo_link.prev_txn_]->undo_logs_[cur_undo_link.prev_log_idx_]};
+        cannot_delete[cur_undo_link.prev_txn_] = true;
+        if (cur_undo_log.ts_ <= watermark) {
+          break;
+        }
+        /**
+         * 应该至少有一个 UndoLog `ts_ <= watermark`,
+         * 此处前往的 UndoLog 应该仍存在.
+         * 若其已经是 `watermark` 之下的唯一一个 UndoLog,
+         * 则会先 `break`.
+         */
+        cur_undo_link = cur_undo_log.prev_version_;
+      }
+
+      ++table_iter;
+    }
+  }
+
+  for (auto txn_map_iter = txn_map_.begin(); txn_map_iter != txn_map_.end();) {
+    if (cannot_delete[txn_map_iter->first]) {
+      txn_map_iter++;
+      continue;
+    }
+    auto txn_state{txn_map_iter->second->GetTransactionState()};
+    if (txn_state == TransactionState::RUNNING || txn_state == TransactionState::TAINTED) {
+      txn_map_iter++;
+      continue;
+    }
+    txn_map_iter = txn_map_.erase(txn_map_iter);
+  }
+}
 
 }  // namespace bustub
