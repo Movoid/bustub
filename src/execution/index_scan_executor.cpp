@@ -13,6 +13,7 @@
 #include "execution/executors/index_scan_executor.h"
 #include <typeindex>
 #include "common/macros.h"
+#include "execution/execution_common.h"
 #include "execution/expressions/constant_value_expression.h"
 
 namespace bustub {
@@ -53,6 +54,12 @@ void IndexScanExecutor::Init() {
 auto IndexScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
   // UNIMPLEMENTED("TODO(P3): Add implementation.");
 
+  auto to_txn_mgr{exec_ctx_->GetTransactionManager()};
+  auto to_txn{exec_ctx_->GetTransaction()};
+
+  auto to_table{to_table_info_->table_.get()};
+  const auto &table_schema{to_table_info_->schema_};
+
   /**
    * 顺序扫描.
    */
@@ -66,9 +73,21 @@ auto IndexScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
       const auto &[cur_key, cur_rid]{*(*to_iter_)};
       ++(*to_iter_);
 
-      auto to_table{to_table_info_->table_.get()};
       auto [cur_meta, cur_tuple]{to_table->GetTuple(cur_rid)};
-      if (cur_meta.is_deleted_) {
+
+      /**
+       * MVCC.
+       */
+      auto undone_tuple_opt{GetTupleByTxnReadTs(to_txn_mgr, to_txn, to_table_info_, cur_rid)};
+      if (!undone_tuple_opt.has_value()) {
+        continue;
+      }
+      cur_tuple = std::move(undone_tuple_opt.value());
+      auto undone_key_tuple{
+          cur_tuple.KeyFromTuple(table_schema, *to_real_index_->GetKeySchema(), to_real_index_->GetKeyAttrs())};
+      IntegerKeyType_BTree undone_index_key{};
+      undone_index_key.SetFromKey(undone_key_tuple);
+      if (GenericComparator<TWO_INTEGER_SIZE_B_TREE>{to_real_index_->GetKeySchema()}(cur_key, undone_index_key) != 0) {
         continue;
       }
 
@@ -88,6 +107,7 @@ auto IndexScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
     /**
      * 填充 `rids_`.
      */
+    Tuple key_tuple{};
     if (next_rid_pos_ == 0) {
       BUSTUB_ASSERT(rids_.empty(), "Unexpected.");
       std::vector<Value> key_values{};
@@ -97,7 +117,7 @@ auto IndexScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
                     "Unexpected expression.");
 
       key_values.emplace_back(to_plan_->pred_keys_[next_predkey_pos_]->Evaluate(nullptr, Schema{{}}));
-      Tuple key_tuple{std::move(key_values), to_real_index_->GetKeySchema()};
+      key_tuple = Tuple{std::move(key_values), to_real_index_->GetKeySchema()};
       to_real_index_->ScanKey(key_tuple, &rids_, exec_ctx_->GetTransaction());
       BUSTUB_ASSERT(rids_.size() <= 1, "Unexpected.");
       if (rids_.empty()) {
@@ -112,8 +132,7 @@ auto IndexScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
     BUSTUB_ASSERT(rids_.size() == 1, "Unexepcted.");
     BUSTUB_ASSERT(next_rid_pos_ == 0, "Unexpected.");
 
-    auto to_table{to_table_info_->table_.get()};
-    auto cur_rid{rids_[next_rid_pos_]};
+    const auto &cur_rid{rids_[next_rid_pos_]};
     auto [cur_meta, cur_tuple]{to_table->GetTuple(cur_rid)};
 
     /**
@@ -126,7 +145,17 @@ auto IndexScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
       next_rid_pos_ = 0;
     }
 
-    if (cur_meta.is_deleted_) {
+    /**
+     * MVCC.
+     */
+    auto undone_tuple_opt{GetTupleByTxnReadTs(to_txn_mgr, to_txn, to_table_info_, cur_rid)};
+    if (!undone_tuple_opt.has_value()) {
+      continue;
+    }
+    cur_tuple = std::move(undone_tuple_opt.value());
+    auto undone_key_tuple{
+        cur_tuple.KeyFromTuple(table_schema, *to_real_index_->GetKeySchema(), to_real_index_->GetKeyAttrs())};
+    if (!IsTupleContentEqual(key_tuple, undone_key_tuple)) {
       continue;
     }
 

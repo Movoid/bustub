@@ -47,6 +47,9 @@ auto SeqScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
    * 对于其他更高层的 Executor, 需要先从子 Executor 获得输入.
    */
 
+  auto to_txn_mgr{exec_ctx_->GetTransactionManager()};
+  auto to_txn{exec_ctx_->GetTransaction()};
+
   while (true) {
     if (to_iter_->IsEnd()) {
       return false;
@@ -60,21 +63,11 @@ auto SeqScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
     /**
      * MVCC.
      */
-    auto to_txn_mgr{exec_ctx_->GetTransactionManager()};
-    std::optional<UndoLink> undo_link{};
-    {
-      std::shared_lock txn_map_lk{to_txn_mgr->txn_map_mutex_};
-      undo_link = to_txn_mgr->GetUndoLink(cur_rid);
-    }
-    auto undo_logs{CollectUndoLogs(cur_rid, cur_meta, cur_tuple, undo_link, exec_ctx_->GetTransaction(), to_txn_mgr)};
-    if (!undo_logs.has_value()) {
+    auto undone_tuple_opt{GetTupleByTxnReadTs(to_txn_mgr, to_txn, to_table_info_, cur_rid)};
+    if (!undone_tuple_opt.has_value()) {
       continue;
     }
-    auto undone_tuple{ReconstructTuple(&to_table_info_->schema_, cur_tuple, cur_meta, undo_logs.value())};
-    if (!undone_tuple.has_value()) {
-      continue;
-    }
-    cur_tuple = std::move(undone_tuple.value());
+    cur_tuple = std::move(undone_tuple_opt.value());
 
     /**
      * 使用 Plan 中的, 通过谓词下推获得的 `filter_predicate_` 来过滤.
@@ -87,7 +80,7 @@ auto SeqScanExecutor::Next(Tuple *tuple, RID *rid) -> bool {
     }
 
     *tuple = cur_tuple;
-    *rid = cur_tuple.GetRid();
+    *rid = cur_rid;
     return true;
   }
 }

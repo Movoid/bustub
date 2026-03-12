@@ -82,9 +82,9 @@ auto UpdateExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool {
   auto to_txn_mgr{exec_ctx_->GetTransactionManager()};
   auto to_txn{exec_ctx_->GetTransaction()};
 
-  const auto to_all_index_info{exec_ctx_->GetCatalog()->GetTableIndexes(to_table_info_->name_)};
-  auto &to_table{to_table_info_->table_};
-  const auto &schema{to_table_info_->schema_};
+  const auto all_to_index_infos{exec_ctx_->GetCatalog()->GetTableIndexes(to_table_info_->name_)};
+  auto to_table{to_table_info_->table_.get()};
+  const auto &table_schema{to_table_info_->schema_};
 
   /**
    * 下层的 Output Schema 必须和 Table Schema 相同.
@@ -93,120 +93,182 @@ auto UpdateExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool {
   BUSTUB_ASSERT(to_table_info_->schema_.GetColumnCount() == to_child_executor_->GetOutputSchema().GetColumnCount(),
                 "Unexpected Schema.");
 
-  /**
-   * pair<RID, 更新后 Tuple>.
-   */
-  std::vector<std::pair<RID, Tuple>> need_update_pairs{};
-
-  Tuple input_tuple{};
-  RID input_rid{};
-  while (to_child_executor_->Next(&input_tuple, &input_rid)) {
-    need_update_pairs.emplace_back(input_rid, std::move(input_tuple));
+  bool has_primary_index{};
+  IndexInfo *to_primary_index_info{};
+  Index *to_primary_index{};
+  for (const auto &to_index_info : all_to_index_infos) {
+    if (to_index_info->is_primary_key_) {
+      has_primary_index = true;
+      to_primary_index_info = to_index_info.get();
+      to_primary_index = to_index_info->index_.get();
+      break;
+    }
   }
 
-  for (const auto &update_pair : need_update_pairs) {
-    const auto &[cur_rid, cur_tuple]{update_pair};
+  auto calc_new_tuple{[&](const Tuple &old_tuple) -> Tuple {
     std::vector<Value> new_values{};
-    new_values.reserve(schema.GetColumnCount());
+    new_values.reserve(table_schema.GetColumnCount());
     for (auto &to_expr : to_plan_->target_expressions_) {
-      new_values.emplace_back(to_expr->Evaluate(&cur_tuple, schema));
+      new_values.emplace_back(to_expr->Evaluate(&old_tuple, table_schema));
     }
-    Tuple new_tuple{std::move(new_values), &schema};
+    return Tuple{std::move(new_values), &table_schema};
+  }};
 
-    auto old_meta{to_table->GetTupleMeta(cur_rid)};
-    TupleMeta new_meta{to_txn->GetTransactionTempTs(), false};
-    auto old_undo_link{to_txn_mgr->GetUndoLink(cur_rid)};
+  Tuple cur_tuple{};
+  RID cur_rid{};
+
+  if (all_to_index_infos.empty()) {
     /**
-     * MVCC.
+     * Table 没有 Index.
+     * 直接尝试原地更新.
      */
-    if ((old_meta.ts_ & TXN_START_ID) > 0) {
-      if (old_meta.ts_ != to_txn->GetTransactionTempTs()) {
-        to_txn->SetTainted();
-        throw ExecutionException{"Trying update a tuple which is being modified by another txn."};
-      }
+    while (to_child_executor_->Next(&cur_tuple, &cur_rid)) {
+      auto old_meta{to_table->GetTupleMeta(cur_rid)};
+      auto new_tuple{calc_new_tuple(cur_tuple)};
+      TryUpdateTupleAndUndoLinkWithCheck(to_txn_mgr, to_txn, to_table_info_, cur_rid, &old_meta, &cur_tuple, &new_tuple,
+                                         false);
+      auto update_rid{cur_tuple.GetRid()};
+      to_txn->AppendWriteSet(to_table_info_->oid_, update_rid);
+      updated_cnt_++;
+    }
+  } else {
+    /**
+     * 可能使用 IndexScan.
+     */
+    std::vector<Tuple> input_tuples{};
+    while (to_child_executor_->Next(&cur_tuple, &cur_rid)) {
+      input_tuples.emplace_back(std::move(cur_tuple));
+    }
+
+    if (has_primary_index) {
       /**
-       * 若 `old_meta.ts_` 是当前事务的 temp ts,
-       * 则在这个 Tuple 上的修改都会被此 temp ts 阻止.
-       * 当前事务可以安全修改.
+       * 有主键索引.
+       * 既然这个 Tuple 能被子 Executor 读取到,
+       * 则其在主键 Index 一定存在 Index Entry.
+       *
+       * 主键若发生变化则需要走 Insert 逻辑.
        */
 
-      BUSTUB_ASSERT(old_meta == new_meta, "Unexpected.");
-      if (!old_undo_link.has_value()) {
-        /**
-         * 事务先 Insert 再 Update, 则这个 Tuple 没有 UndoLog.
-         */
-        to_table->UpdateTupleInPlace(new_meta, new_tuple, cur_rid);
-      } else {
-        /**
-         * 此 Tuple 被当前事务修改过, 且存在修改前版本的 UndoLog.
-         */
-        auto gen_undo_log{GenerateUpdatedUndoLog(&to_table_info_->schema_, &cur_tuple, &new_tuple,
-                                                 to_txn_mgr->GetUndoLog(old_undo_link.value()))};
-        BUSTUB_ASSERT(old_undo_link.value().prev_txn_ == to_txn->GetTransactionId(), "Unexpected.");
-        to_txn->ModifyUndoLog(old_undo_link.value().prev_log_idx_, std::move(gen_undo_log));
-        to_table->UpdateTupleInPlace(new_meta, new_tuple, cur_rid);
-      }
-    } else {
-      if (old_meta.ts_ > to_txn->GetReadTs()) {
-        to_txn->SetTainted();
-        throw ExecutionException{"Trying update a tuple which has been updated in the future."};
-      }
-      /**
-       * 此 Tuple 可能没有 UndoLog.
-       *
-       * UpdateTupleAndUndoLink 需要执行 WW-Conflict 检查.
-       *
-       * WARNING: 注意当前事务此时没有持有任何 Latch.
-       * 当前事务从 Child Executor 得到 Tuple 后,
-       * 若有其他事务启动,
-       * 并通过 `UpdateTupleAndUndoLink()` 成功修改了 TableHeap + UndoLog,
-       * 且 **没有 Commit**,
-       * 则 `old_undo_link` 得到的是被其他事务修改后的结果.
-       * 这种 Race 应该被 Check WW-Conflict 检测到.
-       */
+      std::vector<RID> existed_rid{};
+      existed_rid.reserve(1);
+      for (const auto &input_tuple : input_tuples) {
+        auto new_tuple{calc_new_tuple(input_tuple)};
+        auto old_primary_key_tuple{input_tuple.KeyFromTuple(table_schema, to_primary_index_info->key_schema_,
+                                                            to_primary_index->GetKeyAttrs())};
+        auto new_primary_key_tuple{
+            new_tuple.KeyFromTuple(table_schema, to_primary_index_info->key_schema_, to_primary_index->GetKeyAttrs())};
 
-      auto gen_undo_log{GenerateNewUndoLog(&to_table_info_->schema_, &cur_tuple, &new_tuple, old_meta.ts_,
-                                           old_undo_link.value_or(UndoLink{}))};
-      auto gen_undo_link{to_txn->AppendUndoLog(std::move(gen_undo_log))};
-      auto check_ww_conflict{[&](const TupleMeta &base_meta, const Tuple &base_tuple, RID rid,
-                                 std::optional<UndoLink> gen_undo_link) -> bool {
-        if (base_meta.ts_ > to_txn->GetReadTs()) {
-          return false;  // NOLINT
+        if (IsTupleContentEqual(old_primary_key_tuple, new_primary_key_tuple)) {
+          auto update_rid{input_tuple.GetRid()};
+
+          for (auto &to_index_info : all_to_index_infos) {
+            if (to_index_info->is_primary_key_) {
+              continue;
+            }
+            BUSTUB_ASSERT(false, "Unsupport.");
+            auto &to_index{to_index_info->index_};
+            auto old_key_tuple{
+                input_tuple.KeyFromTuple(table_schema, to_index_info->key_schema_, to_index->GetKeyAttrs())};
+            auto new_key_tuple{
+                new_tuple.KeyFromTuple(table_schema, to_index_info->key_schema_, to_index->GetKeyAttrs())};
+            if (IsTupleContentEqual(old_key_tuple, new_key_tuple)) {
+              continue;
+            }
+            /**
+             * WARNING: 实际不支持 Second Index.
+             * 若一个 Tuple 被删除, 其存在 Second Index 的 Column 取值无法被重新使用.
+             * 尝试插入另一个在此 Column 上取值相同的 Tuple, 此处 InsertEntry 会失败.
+             */
+            auto status{to_index->InsertEntry(new_key_tuple, update_rid, to_txn)};
+            if (!status) {
+              to_txn->SetTainted();
+              throw ExecutionException{"Conflict on second index."};
+            }
+          }
+
+          auto old_meta{to_table->GetTupleMeta(update_rid)};
+          TryUpdateTupleAndUndoLinkWithCheck(to_txn_mgr, to_txn, to_table_info_, update_rid, &old_meta, &input_tuple,
+                                             &new_tuple, false);
+          to_txn->AppendWriteSet(to_table_info_->oid_, update_rid);
+          continue;
         }
-        return true;
-      }};
 
-      if (!UpdateTupleAndUndoLink(to_txn_mgr, cur_rid, gen_undo_link, to_table.get(), to_txn, new_meta, new_tuple,
-                                  check_ww_conflict)) {
-        to_txn->SetTainted();
-        throw ExecutionException{"Check WW-Conflict failed."};
+        /**
+         * 主键改变.
+         * 需要进行 Insert 逻辑, 插入更新后的元组.
+         * 若更新后的主键和表中另一元组重复, 则插入 Index Entry 将失败.
+         */
+
+        TupleMeta insert_meta{to_txn->GetTransactionTempTs(), false};
+        auto insert_rid_opt{to_table->InsertTuple(insert_meta, new_tuple)};
+        BUSTUB_ASSERT(insert_rid_opt.has_value(), "Unexpected.");
+        auto insert_rid{insert_rid_opt.value()};
+
+        for (auto &to_index_info : all_to_index_infos) {
+          if (to_index_info->is_primary_key_) {
+            continue;
+          }
+          BUSTUB_ASSERT(false, "Unsupport.");
+          auto &to_index{to_index_info->index_};
+          auto insert_key_tuple{
+              new_tuple.KeyFromTuple(table_schema, to_index_info->key_schema_, to_index->GetKeyAttrs())};
+          /**
+           * WARNING: 实际不支持 Second Index.
+           * 若一个 Tuple 被删除, 其存在 Second Index 的 Column 取值无法被重新使用.
+           * 尝试插入另一个在此 Column 上取值相同的 Tuple, 此处 InsertEntry 会失败.
+           */
+          auto status{to_index->InsertEntry(insert_key_tuple, insert_rid, to_txn)};
+          if (!status) {
+            to_txn->SetTainted();
+            throw ExecutionException{"Conflict on second index."};
+          }
+        }
+
+        auto status{to_primary_index->InsertEntry(new_primary_key_tuple, insert_rid, to_txn)};
+        if (!status) {
+          to_txn->SetTainted();
+          throw ExecutionException{"Conflict on primary key index with another tuple."};
+        }
+
+        to_txn->AppendWriteSet(to_table_info_->oid_, insert_rid);
       }
-    }
 
-    to_txn->AppendWriteSet(to_table_info_->oid_, cur_rid);
+      updated_cnt_++;
 
-    /**
-     * 处理 Index.
-     */
-    for (auto &to_index_info : to_all_index_info) {
-      auto &cur_index{to_index_info->index_};
+    } else {
       /**
-       * 注意, 需要传递 key 的 Tuple 而不是完整 Tuple.
+       * 没有主键索引.
+       * 但有其他 Index.
        */
-      auto old_key_tuple{
-          cur_tuple.KeyFromTuple(to_table_info_->schema_, to_index_info->key_schema_, cur_index->GetKeyAttrs())};
-      auto new_key_tuple{
-          new_tuple.KeyFromTuple(to_table_info_->schema_, to_index_info->key_schema_, cur_index->GetKeyAttrs())};
-      if (IsTupleContentEqual(old_key_tuple, new_key_tuple)) {
-        continue;
+      for (const auto &input_tuple : input_tuples) {
+        auto new_tuple{calc_new_tuple(input_tuple)};
+
+        auto update_rid{new_tuple.GetRid()};
+
+        auto old_meta{to_table->GetTupleMeta(update_rid)};
+        TryUpdateTupleAndUndoLinkWithCheck(to_txn_mgr, to_txn, to_table_info_, update_rid, &old_meta, &input_tuple,
+                                           &new_tuple, false);
+
+        for (auto &to_index_info : all_to_index_infos) {
+          BUSTUB_ASSERT(false, "Unsupported.");
+          auto &to_index{to_index_info->index_};
+          auto old_key_tuple{
+              input_tuple.KeyFromTuple(table_schema, to_index_info->key_schema_, to_index->GetKeyAttrs())};
+          auto new_key_tuple{new_tuple.KeyFromTuple(table_schema, to_index_info->key_schema_, to_index->GetKeyAttrs())};
+
+          if (IsTupleContentEqual(old_key_tuple, new_key_tuple)) {
+            continue;
+          }
+
+          auto status{to_index->InsertEntry(new_key_tuple, update_rid, to_txn)};
+          if (!status) {
+            to_txn->SetTainted();
+            throw ExecutionException{"Conflict on second index."};
+          }
+        }
+        updated_cnt_++;
       }
-      auto status{cur_index->InsertEntry(new_key_tuple, cur_rid, exec_ctx_->GetTransaction())};
-      BUSTUB_ASSERT(status, "Unexpected fail.");
     }
-    /**
-     * End.
-     */
-    updated_cnt_++;
   }
 
   /**

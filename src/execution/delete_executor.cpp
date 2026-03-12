@@ -74,58 +74,12 @@ auto DeleteExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool {
      * 删除 Tuple.
      */
     auto old_meta{to_table->GetTupleMeta(cur_rid)};
-    TupleMeta new_meta{to_txn->GetTransactionTempTs(), true};
-    auto old_undo_link{to_txn_mgr->GetUndoLink(cur_rid)};
-    if ((old_meta.ts_ & TXN_START_ID) > 0) {
-      if (old_meta.ts_ != to_txn->GetTransactionTempTs()) {
-        to_txn->SetTainted();
-        throw ExecutionException{"Trying update a tuple which is being modified by another txn."};
-      }
 
-      if (!old_undo_link.has_value()) {
-        to_table->UpdateTupleMeta(new_meta, cur_rid);
-      } else {
-        auto gen_undo_log{GenerateUpdatedUndoLog(&to_table_info_->schema_, &cur_tuple, nullptr,
-                                                 to_txn_mgr->GetUndoLog(old_undo_link.value()))};
-        BUSTUB_ASSERT(old_undo_link.value().prev_txn_ == to_txn->GetTransactionId(), "Unexpected.");
-        to_txn->ModifyUndoLog(old_undo_link.value().prev_log_idx_, std::move(gen_undo_log));
-        to_table->UpdateTupleMeta(new_meta, cur_rid);
-      }
-    } else {
-      if (old_meta.ts_ > to_txn->GetReadTs()) {
-        to_txn->SetTainted();
-        throw ExecutionException{"Trying update a tuple which has been updated in the future."};
-      }
-
-      auto gen_undo_log{GenerateNewUndoLog(&to_table_info_->schema_, &cur_tuple, nullptr, old_meta.ts_,
-                                           old_undo_link.value_or(UndoLink{}))};
-      auto gen_undo_link{to_txn->AppendUndoLog(std::move(gen_undo_log))};
-      auto check_ww_conflict{[&](const TupleMeta &base_meta, const Tuple &base_tuple, RID rid,
-                                 std::optional<UndoLink> gen_undo_link) -> bool {
-        if (base_meta.ts_ > to_txn->GetReadTs()) {
-          return false;  // NOLINT
-        }
-        return true;
-      }};
-
-      if (!UpdateTupleAndUndoLink(to_txn_mgr, cur_rid, gen_undo_link, to_table.get(), to_txn, new_meta, cur_tuple,
-                                  check_ww_conflict)) {
-        to_txn->SetTainted();
-        throw ExecutionException{"Check WW-Conflict failed."};
-      }
-    }
+    TryUpdateTupleAndUndoLinkWithCheck(to_txn_mgr, to_txn, to_table_info_, cur_rid, &old_meta, &cur_tuple, nullptr,
+                                       false);
 
     to_txn->AppendWriteSet(to_table_info_->oid_, cur_rid);
 
-    /**
-     * 对所有 Index, 删除 Index Entry.
-     */
-    // for (auto &to_index_info : to_all_index_info) {
-    //   auto &cur_index{to_index_info->index_};
-    //   auto delete_key_tuple{
-    //       cur_tuple.KeyFromTuple(to_table_info_->schema_, to_index_info->key_schema_, cur_index->GetKeyAttrs())};
-    //   cur_index->DeleteEntry(delete_key_tuple, cur_rid, exec_ctx_->GetTransaction());
-    // }
     deleted_cnt_++;
   }
 

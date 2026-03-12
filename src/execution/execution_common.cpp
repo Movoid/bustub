@@ -371,6 +371,131 @@ auto GenerateUpdatedUndoLog(const Schema *schema, const Tuple *base_tuple, const
       false, std::move(modified_flag), {std::move(new_base_values), &delta_schema}, log.ts_, log.prev_version_};
 }
 
+/**
+ * 读取 RID 符合 ts 的版本.
+ */
+auto GetTupleByTxnReadTs(TransactionManager *to_txn_mgr, Transaction *to_txn, const TableInfo *to_table_info, RID rid)
+    -> std::optional<Tuple> {
+  auto to_table{to_table_info->table_.get()};
+  auto &table_schema{to_table_info->schema_};
+
+  auto [meta, tuple]{to_table->GetTuple(rid)};
+  std::optional<UndoLink> undo_link_opt{};
+  {
+    std::shared_lock txn_map_lk{to_txn_mgr->txn_map_mutex_};
+    undo_link_opt = to_txn_mgr->GetUndoLink(rid);
+  }
+  auto undo_logs_opt{CollectUndoLogs(rid, meta, tuple, undo_link_opt, to_txn, to_txn_mgr)};
+  if (!undo_logs_opt.has_value()) {
+    return std::nullopt;
+  }
+  auto undone_tuple_opt{ReconstructTuple(&table_schema, tuple, meta, undo_logs_opt.value())};
+  return undone_tuple_opt;
+}
+
+/**
+ * 在 RID 已经有效的情况下, 尝试进行更新.
+ * `base_meta` 可以直接 `GetTupleMeta()` 读取.
+ */
+auto TryUpdateTupleAndUndoLinkWithCheck(TransactionManager *to_txn_mgr, Transaction *to_txn,
+                                        const TableInfo *to_table_info, RID update_rid, const TupleMeta *base_meta,
+                                        const Tuple *base_tuple, const Tuple *target_tuple, bool is_insert_op) -> bool {
+  auto to_table{to_table_info->table_.get()};
+  auto &table_schema{to_table_info->schema_};
+
+  TupleMeta new_meta{to_txn->GetTransactionTempTs(), target_tuple == nullptr};
+  auto old_undo_link{to_txn_mgr->GetUndoLink(update_rid)};
+  if ((base_meta->ts_ & TXN_START_ID) > 0) {
+    if (base_meta->ts_ != to_txn->GetTransactionTempTs()) {
+      to_txn->SetTainted();
+      throw ExecutionException{"Trying update a tuple which is being modified by another txn."};
+    }
+    /**
+     * 不允许 Insert 操作在一个非 deleted 的 Tuple 上执行.
+     */
+    if (is_insert_op && !base_meta->is_deleted_) {
+      to_txn->SetTainted();
+      throw ExecutionException{"Expected update on a deleted tuple."};
+    }
+    /**
+     * 当前事务先前已经修改过此 Tuple,
+     * 由于 Tuple ts 被设为事务 temp ts,
+     * 当前事务可以安全独占修改.
+     */
+    // BUSTUB_ASSERT(*base_meta == new_meta, "Unexpected.");
+    if (old_undo_link.has_value()) {
+      auto gen_undo_log{GenerateUpdatedUndoLog(&table_schema, base_tuple, target_tuple,
+                                               to_txn_mgr->GetUndoLog(old_undo_link.value()))};
+      BUSTUB_ASSERT(old_undo_link.value().prev_txn_ == to_txn->GetTransactionId(), "Unexpected.");
+      to_txn->ModifyUndoLog(old_undo_link.value().prev_log_idx_, std::move(gen_undo_log));
+    }
+    if (target_tuple == nullptr) {
+      BUSTUB_ASSERT(new_meta.is_deleted_, "Unexpected.");
+      to_table->UpdateTupleMeta(new_meta, update_rid);
+    } else {
+      BUSTUB_ASSERT(!new_meta.is_deleted_, "Unexpected.");
+      to_table->UpdateTupleInPlace(new_meta, *target_tuple, update_rid);
+    }
+  } else {
+    if (base_meta->ts_ > to_txn->GetReadTs()) {
+      to_txn->SetTainted();
+      throw ExecutionException{"Trying update a tuple which has been updated in the future."};
+    }
+
+    /**
+     * 此 Tuple 可能没有 UndoLog.
+     *
+     * UpdateTupleAndUndoLink 需要执行 WW-Conflict 检查.
+     *
+     * WARNING: 注意当前事务此时没有持有任何 Latch.
+     * 当前事务从 Child Executor 得到 Tuple 后,
+     * 若有其他事务启动,
+     * 并通过 `UpdateTupleAndUndoLink()` 成功修改了 TableHeap + UndoLog,
+     * 且 **没有 Commit**,
+     * 则 `old_undo_link` 得到的是被其他事务修改后的结果.
+     * 这种 Race 应该被 Check WW-Conflict 检测到.
+     *
+     * WARNING: 或另一种情况, 同上的其他事务启动并成功修改了此 Tuple 并 Commit,
+     * Check WW-Conflict 需要能发现此 Tuple 最新版本的 ts 晚于当前事务的 read ts.
+     */
+    auto gen_undo_log{GenerateNewUndoLog(&table_schema, base_tuple, target_tuple, base_meta->ts_,
+                                         old_undo_link.value_or(UndoLink{}))};
+    auto gen_undo_link{to_txn->AppendUndoLog(std::move(gen_undo_log))};
+
+    /**
+     * WARNING: 关于 check_ww_conflict,
+     * 对于 InsertExecutor 对主键 Index 的 Index Entry 指向的 RID 位置的复用操作,
+     * 需要额外检查, 其 TupleMeta 最新状态是否是 `is_delete_ == true`.
+     */
+
+    /**
+     * 在删除时仍将 Tuple 更新为 `base_tuple`, 绕过 bustub 的 size mismatch check.
+     */
+
+    auto check_ww_conflict_when_insert{std::function{[&](const TupleMeta &base_meta, const Tuple &base_tuple, RID rid,
+                                                         std::optional<UndoLink> gen_undo_link) -> bool {
+      // 要求元组必须已经被删除.
+      return base_meta.ts_ <= to_txn->GetReadTs() && base_meta.is_deleted_;
+    }}};
+
+    auto check_ww_conflict_when_update{std::function{[&](const TupleMeta &base_meta, const Tuple &base_tuple, RID rid,
+                                                         std::optional<UndoLink> gen_undo_link) -> bool {
+      // 不要求删除.
+      return base_meta.ts_ <= to_txn->GetReadTs();
+    }}};
+
+    if (!UpdateTupleAndUndoLink(
+            to_txn_mgr, update_rid, gen_undo_link, to_table, to_txn, new_meta,
+            target_tuple == nullptr ? *base_tuple : *target_tuple,
+            std::move(is_insert_op ? check_ww_conflict_when_insert : check_ww_conflict_when_update))) {
+      to_txn->SetTainted();
+      throw ExecutionException{"Check WW-Conflict failed."};
+    }
+  }
+
+  return true;
+}
+
 void TxnMgrDbg(const std::string &info, TransactionManager *txn_mgr, const TableInfo *table_info,
                TableHeap *table_heap) {
   // always use stderr for printing logs...

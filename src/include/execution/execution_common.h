@@ -70,6 +70,13 @@ auto GenerateNewUndoLog(const Schema *schema, const Tuple *base_tuple, const Tup
 auto GenerateUpdatedUndoLog(const Schema *schema, const Tuple *base_tuple, const Tuple *target_tuple,
                             const UndoLog &log) -> UndoLog;
 
+auto GetTupleByTxnReadTs(TransactionManager *to_txn_mgr, Transaction *to_txn, const TableInfo *to_table_info, RID rid)
+    -> std::optional<Tuple>;
+
+auto TryUpdateTupleAndUndoLinkWithCheck(TransactionManager *to_txn_mgr, Transaction *to_txn,
+                                        const TableInfo *to_table_info, RID rid, const TupleMeta *base_meta,
+                                        const Tuple *base_tuple, const Tuple *target_tuple, bool is_insert_op) -> bool;
+
 void TxnMgrDbg(const std::string &info, TransactionManager *txn_mgr, const TableInfo *table_info,
                TableHeap *table_heap);
 
