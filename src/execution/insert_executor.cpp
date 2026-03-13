@@ -145,6 +145,7 @@ auto InsertExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool {
           auto insert_rid_opt{to_table->InsertTuple(insert_meta, input_tuple)};
           BUSTUB_ASSERT(insert_rid_opt.has_value(), "Unexpected.");
           auto insert_rid{insert_rid_opt.value()};
+          to_txn->AppendWriteSet(to_table_info_->oid_, insert_rid);
 
           for (auto &to_index_info : all_to_index_infos) {
             if (to_index_info->is_primary_key_) {
@@ -173,8 +174,6 @@ auto InsertExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool {
             to_txn->SetTainted();
             throw ExecutionException{"Another txn inserted a primary key index entry earlier."};
           }
-
-          to_txn->AppendWriteSet(to_table_info_->oid_, insert_rid);
 
         } else {
           /**

@@ -177,14 +177,13 @@ auto UpdateExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool {
           auto insert_rid_opt{to_table->InsertTuple(insert_meta, new_tuple)};
           BUSTUB_ASSERT(insert_rid_opt.has_value(), "Unexpected.");
           auto insert_rid{insert_rid_opt.value()};
+          to_txn->AppendWriteSet(to_table_info_->oid_, insert_rid);
 
           auto status{to_primary_index->InsertEntry(new_primary_key_tuple, insert_rid, to_txn)};
           if (!status) {
             to_txn->SetTainted();
             throw ExecutionException{"Conflict on primary key index with another tuple."};
           }
-
-          to_txn->AppendWriteSet(to_table_info_->oid_, insert_rid);
 
         } else {
           /**
@@ -211,11 +210,12 @@ auto UpdateExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) -> bool {
       for (const auto &input_tuple : input_tuples) {
         auto new_tuple{calc_new_tuple(input_tuple)};
 
-        auto update_rid{new_tuple.GetRid()};
+        auto update_rid{input_tuple.GetRid()};
 
         auto old_meta{to_table->GetTupleMeta(update_rid)};
         TryUpdateTupleAndUndoLinkWithCheck(to_txn_mgr, to_txn, to_table_info_, update_rid, &old_meta, &input_tuple,
                                            &new_tuple, false);
+        to_txn->AppendWriteSet(to_table_info_->oid_, update_rid);
 
         for (auto &to_index_info : all_to_index_infos) {
           BUSTUB_ASSERT(false, "Unsupported.");

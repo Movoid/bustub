@@ -197,11 +197,12 @@ auto CollectUndoLogs(RID rid, const TupleMeta &base_meta, const Tuple &base_tupl
     }
 
     auto to_undo_log{to_cur_txn->GetUndoLog(cur_undo_link.prev_log_idx_)};
+    auto next_link{to_undo_log.prev_version_};
     needed_undo_logs.emplace_back(std::move(to_undo_log));
     if (needed_undo_logs.back().ts_ <= read_ts) {
       break;
     }
-    cur_undo_link = to_undo_log.prev_version_;
+    cur_undo_link = next_link;
   }
 
   if (!cur_undo_link.IsValid()) {

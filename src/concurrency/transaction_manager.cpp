@@ -113,6 +113,9 @@ auto TransactionManager::Commit(Transaction *to_txn) -> bool {
 /**
  * Aborts a transaction
  * @param txn the transaction to abort, the txn will be managed by the txn manager so no need to delete it by yourself
+ *
+ * WriteSet 记录了当前 Txn 操作过的 Tuple 位置.
+ * 由于 temp ts 的存在, 当前事务独占了对此 Tuple 位置的修改权.
  */
 void TransactionManager::Abort(Transaction *txn) {
   if (txn->state_ != TransactionState::RUNNING && txn->state_ != TransactionState::TAINTED) {
