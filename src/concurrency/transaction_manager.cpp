@@ -117,16 +117,57 @@ auto TransactionManager::Commit(Transaction *to_txn) -> bool {
  * WriteSet 记录了当前 Txn 操作过的 Tuple 位置.
  * 由于 temp ts 的存在, 当前事务独占了对此 Tuple 位置的修改权.
  */
-void TransactionManager::Abort(Transaction *txn) {
-  if (txn->state_ != TransactionState::RUNNING && txn->state_ != TransactionState::TAINTED) {
+void TransactionManager::Abort(Transaction *to_txn) {
+  if (to_txn->state_ != TransactionState::RUNNING && to_txn->state_ != TransactionState::TAINTED) {
     throw Exception("txn not in running / tainted state");
   }
 
-  // TODO(fall2023): Implement the abort logic!
+  for (const auto &[table_oid, table_rid_set] : to_txn->write_set_) {
+    for (const auto &rid : table_rid_set) {
+      const auto *to_table_info{catalog_->GetTable(table_oid).get()};
+      auto to_table{to_table_info->table_.get()};
+      const auto &table_schema{to_table_info->schema_};
+
+      auto old_meta{to_table->GetTupleMeta(rid)};
+
+      if ((old_meta.ts_ & TXN_START_ID) == 0) {
+        continue;
+      }
+      BUSTUB_ASSERT(old_meta.ts_ == to_txn->GetTransactionTempTs(), "Unexpected.");
+
+      /**
+       * 通常不可能出现脏写.
+       * 当前事务独占此 RID 位置上的修改权.
+       */
+      auto undo_link_opt{GetUndoLink(rid)};
+      /**
+       * 若事务执行的是 Insert 操作,
+       * 可能没有 UndoLink.
+       */
+      if (undo_link_opt.has_value()) {
+        auto undo_link{undo_link_opt.value()};
+        BUSTUB_ASSERT(undo_link.prev_txn_ == to_txn->GetTransactionId(), "Unexpected.");
+
+        auto undo_log{GetUndoLog(undo_link)};
+        BUSTUB_ASSERT(undo_log.prev_version_.prev_txn_ != to_txn->GetTransactionId(), "Unexpected.");
+
+        auto [old_meta, old_tuple]{to_table->GetTuple(rid)};
+        auto recov_tuple_opt{ReconstructTuple(&table_schema, old_tuple, old_meta, {undo_log})};
+
+        TupleMeta recov_meta{undo_log.ts_, !recov_tuple_opt.has_value()};
+        UpdateTupleAndUndoLink(this, rid, undo_log.prev_version_, to_table, to_txn, recov_meta,
+                               recov_tuple_opt.value_or(old_tuple));
+
+      } else {
+        TupleMeta recov_meta{0, true};
+        to_table->UpdateTupleMeta(recov_meta, rid);
+      }
+    }
+  }
 
   std::unique_lock<std::shared_mutex> lck(txn_map_mutex_);
-  txn->state_ = TransactionState::ABORTED;
-  running_txns_.RemoveTxn(txn->read_ts_);
+  to_txn->state_ = TransactionState::ABORTED;
+  running_txns_.RemoveTxn(to_txn->read_ts_);
 }
 
 /**

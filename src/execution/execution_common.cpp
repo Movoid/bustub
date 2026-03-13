@@ -358,8 +358,12 @@ auto GenerateUpdatedUndoLog(const Schema *schema, const Tuple *base_tuple, const
   new_base_values.reserve(schema->GetColumnCount());
   modified_flag.resize(schema->GetColumnCount());
   for (uint32_t col_idx = 0; col_idx < schema->GetColumnCount(); col_idx++) {
+    /**
+     * bustub 要求 UndoLog 记录的内容不能撤销.
+     * 这是有意为之的.
+     */
     if (!before_base_values[col_idx].CompareExactlyEquals(target_tuple->GetValue(schema, col_idx)) ||
-        log.modified_fields_[col_idx]) {  // bustub 的要求.
+        log.modified_fields_[col_idx]) {
       attrs.emplace_back(col_idx);
       new_base_values.emplace_back(std::move(before_base_values[col_idx]));
       modified_flag[col_idx] = true;
@@ -374,22 +378,21 @@ auto GenerateUpdatedUndoLog(const Schema *schema, const Tuple *base_tuple, const
 
 /**
  * 读取 RID 符合 ts 的版本.
+ *
+ * WARNING: 对 Tuple 和 UndoLink/UndoLog 的读取必须是原子的.
  */
 auto GetTupleByTxnReadTs(TransactionManager *to_txn_mgr, Transaction *to_txn, const TableInfo *to_table_info, RID rid)
     -> std::optional<Tuple> {
   auto to_table{to_table_info->table_.get()};
   auto &table_schema{to_table_info->schema_};
 
-  auto [meta, tuple]{to_table->GetTuple(rid)};
-  std::optional<UndoLink> undo_link_opt{};
-  {
-    std::shared_lock txn_map_lk{to_txn_mgr->txn_map_mutex_};
-    undo_link_opt = to_txn_mgr->GetUndoLink(rid);
-  }
+  auto [meta, tuple, undo_link_opt]{GetTupleAndUndoLink(to_txn_mgr, to_table, rid)};
+
   auto undo_logs_opt{CollectUndoLogs(rid, meta, tuple, undo_link_opt, to_txn, to_txn_mgr)};
   if (!undo_logs_opt.has_value()) {
     return std::nullopt;
   }
+
   auto undone_tuple_opt{ReconstructTuple(&table_schema, tuple, meta, undo_logs_opt.value())};
   return undone_tuple_opt;
 }
@@ -420,23 +423,33 @@ auto TryUpdateTupleAndUndoLinkWithCheck(TransactionManager *to_txn_mgr, Transact
     }
     /**
      * 当前事务先前已经修改过此 Tuple,
-     * 由于 Tuple ts 被设为事务 temp ts,
-     * 当前事务可以安全独占修改.
+     * Tuple ts 被设为事务 temp ts.
+     *
+     * WARNING: 虽然此处由于 temp ts, 事务独占对此 RID 位置的修改权,
+     * 但对 UndoLink/UndoLog 的修改, 和对 Tuple 的修改,
+     * 应该尽可能原子.
+     * 严格来说, 非原子更新会导致 Tuple 和 UndoLink 不同步的状态被 `GetTupleByTxnReadTs()` 读取.
+     * 但 bustub `GenerateUpdatedUndoLog()` 生成的 UndoLog 由于保留较多信息, 仍能正确回溯.
      */
-    // BUSTUB_ASSERT(*base_meta == new_meta, "Unexpected.");
     if (old_undo_link.has_value()) {
       auto gen_undo_log{GenerateUpdatedUndoLog(&table_schema, base_tuple, target_tuple,
                                                to_txn_mgr->GetUndoLog(old_undo_link.value()))};
       BUSTUB_ASSERT(old_undo_link.value().prev_txn_ == to_txn->GetTransactionId(), "Unexpected.");
-      to_txn->ModifyUndoLog(old_undo_link.value().prev_log_idx_, std::move(gen_undo_log));
-    }
-    if (target_tuple == nullptr) {
-      BUSTUB_ASSERT(new_meta.is_deleted_, "Unexpected.");
-      to_table->UpdateTupleMeta(new_meta, update_rid);
+
+      to_txn->ModifyUndoLog(old_undo_link->prev_log_idx_, gen_undo_log);
+      if (target_tuple == nullptr) {
+        BUSTUB_ASSERT(new_meta.is_deleted_ == true, "Unexpected.");
+        to_table->UpdateTupleMeta(new_meta, update_rid);
+      } else {
+        BUSTUB_ASSERT(new_meta.is_deleted_ == false, "Unexpected.");
+        to_table->UpdateTupleInPlace(new_meta, *target_tuple, update_rid);
+      }
+
     } else {
-      BUSTUB_ASSERT(!new_meta.is_deleted_, "Unexpected.");
-      to_table->UpdateTupleInPlace(new_meta, *target_tuple, update_rid);
+      UpdateTupleAndUndoLink(to_txn_mgr, update_rid, std::nullopt, to_table, to_txn, new_meta,
+                             target_tuple == nullptr ? *base_tuple : *target_tuple);
     }
+
   } else {
     if (base_meta->ts_ > to_txn->GetReadTs()) {
       to_txn->SetTainted();
