@@ -351,7 +351,7 @@ void BPLUSTREE_TYPE::Remove(const KeyType &key) {
             BUSTUB_ASSERT(page_data->CoveredKey(backfix_key, comparator_), "Unexpected.");
             BackfixRemoveKv(page_g, backfix_kv);
             page_data = page_g.As<InternalPage>();
-            try_delete_root_hint |= leaf_data->GetValidSize() == 0 && page_data->IsLevelHead() &&
+            try_delete_root_hint |= page_data->GetValidSize() == 0 && page_data->IsLevelHead() &&
                                     page_data->GetNextPageId() == INVALID_PAGE_ID;
           }
           next_level++;
