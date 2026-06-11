@@ -65,14 +65,13 @@ auto ConcurrentTempFrameBuffer::TryDeallocate(char *ptr) -> bool {
 DiskScheduler::PageTaskBlock::PageTaskBlock(page_id_t page_id, WorkerTable::WorkerShard *to_worker_shard)
     : ptb_page_id_{page_id}, to_worker_shard_{to_worker_shard} {}
 
-void DiskScheduler::PageTaskBlock::SubmitFlushTask(char *new_flush_src, bool is_deallocable,
+void DiskScheduler::PageTaskBlock::SubmitFlushTask(char *new_flush_src, [[maybe_unused]] bool is_deallocable,
                                                    DiskSchedulerPromise &&callback) {
-  auto old_state{state_.load(std::memory_order_acquire)};
-
   pending_flush_cb_.emplace(Callback{std::move(callback), new_flush_src});
   auto old_flush_src{flush_src_.exchange(new_flush_src, std::memory_order_release)};
 
   while (true) {
+    auto old_state{state_.load(std::memory_order_relaxed)};
     auto new_state{old_state | State::PENDING_FLUSH | State::IS_INQUEUE};
     if (state_.compare_exchange_weak(old_state, new_state, std::memory_order_release, std::memory_order_relaxed)) {
       if ((old_state & State::IS_INQUEUE) == 0) {
@@ -85,14 +84,13 @@ void DiskScheduler::PageTaskBlock::SubmitFlushTask(char *new_flush_src, bool is_
   to_worker_shard_->temp_frame_buffer_.TryDeallocate(old_flush_src);
 }
 
-void DiskScheduler::PageTaskBlock::SubmitFetchTask(char *new_fetch_dst, bool is_deallocable,
+void DiskScheduler::PageTaskBlock::SubmitFetchTask(char *new_fetch_dst, [[maybe_unused]] bool is_deallocable,
                                                    DiskSchedulerPromise &&callback) {
-  auto old_state{state_.load(std::memory_order_acquire)};
-
   pending_fetch_cb_.emplace(Callback{std::move(callback), new_fetch_dst});
   auto old_fetch_dst{fetch_dst_.exchange(new_fetch_dst, std::memory_order_release)};
 
   while (true) {
+    auto old_state{state_.load(std::memory_order_relaxed)};
     auto new_state{old_state | State::PENDING_FETCH | State::IS_INQUEUE};
     if (state_.compare_exchange_weak(old_state, new_state, std::memory_order_release, std::memory_order_relaxed)) {
       if ((old_state & State::IS_INQUEUE) == 0) {
@@ -200,8 +198,11 @@ auto DiskScheduler::PageTaskBlock::TrySetDequeued() -> bool {
 
   BUSTUB_ASSERT((old_state & State::IS_INQUEUE), "Unexpected.");
 
+  /**
+   * 检查是否不只有 `State::IS_INQUEUE`,
+   * 若 `true` 则说明存在 `State::PENDING_*` .
+   */
   if (old_state != State::IS_INQUEUE) {
-    // 存在 `PENDING_*`.
     return false;
   }
 

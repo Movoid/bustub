@@ -24,6 +24,8 @@ namespace bustub {
 //
 // ========================================
 
+#define wwwwocaonnima 666
+
 /**
  * @brief The constructor for a `FrameHeader` that initializes all fields to default values.
  *
@@ -350,7 +352,7 @@ auto BufferPoolManager::DeletePage(page_id_t page_id) -> bool {
  * @return std::optional<WritePageGuard> An optional latch guard where if there are no more free frames (out of memory)
  * returns `std::nullopt`, otherwise returns a `WritePageGuard` ensuring exclusive and mutable access to a page's data.
  */
-auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_type) -> std::optional<WritePageGuard> {
+auto BufferPoolManager::CheckedWritePage(page_id_t page_id, [[maybe_unused]] AccessType access_type) -> std::optional<WritePageGuard> {
   if (page_id == INVALID_PAGE_ID) {
     return std::nullopt;
   }
@@ -488,7 +490,7 @@ auto BufferPoolManager::CheckedWritePage(page_id_t page_id, AccessType access_ty
  * @return std::optional<ReadPageGuard> An optional latch guard where if there are no more free frames (out of memory)
  * returns `std::nullopt`, otherwise returns a `ReadPageGuard` ensuring shared and read-only access to a page's data.
  */
-auto BufferPoolManager::CheckedReadPage(page_id_t page_id, AccessType access_type) -> std::optional<ReadPageGuard> {
+auto BufferPoolManager::CheckedReadPage(page_id_t page_id, [[maybe_unused]] AccessType access_type) -> std::optional<ReadPageGuard> {
   if (page_id == INVALID_PAGE_ID) {
     return std::nullopt;
   }

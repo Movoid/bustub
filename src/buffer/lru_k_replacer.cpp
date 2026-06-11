@@ -527,7 +527,7 @@ auto ShardingLRUKReplacer::GetPinCnt(frame_id_t frame_id) -> std::uint64_t {
  * 但需要维护一个多生产者 RingBuffer.
  * Keep it simple.
  */
-void ShardingLRUKReplacer::PinAndRecordAccess(frame_id_t frame_id, AccessType access_type) {
+void ShardingLRUKReplacer::PinAndRecordAccess(frame_id_t frame_id, [[maybe_unused]] AccessType access_type) {
   auto to_shard{table_.VisitShard(frame_id)};
   auto to_node{&nodes_[frame_id]};
   {
@@ -542,7 +542,7 @@ void ShardingLRUKReplacer::PinAndRecordAccess(frame_id_t frame_id, AccessType ac
  * 但需要维护一个多生产者 RingBuffer.
  * Keep it simple.
  */
-void ShardingLRUKReplacer::RecordAccess(frame_id_t frame_id, AccessType access_type) {
+void ShardingLRUKReplacer::RecordAccess(frame_id_t frame_id, [[maybe_unused]] AccessType access_type) {
   auto to_shard{table_.VisitShard(frame_id)};
   auto to_node{&nodes_[frame_id]};
   {

@@ -812,7 +812,7 @@ auto BPLUSTREE_TYPE::TryMergeAndGo(WritePageGuard &page_g, IndexKvPack &backfix_
       break;
 
     case BackfixStatus::NEED_UNLINK:
-      // 在 BackfixRemoveKv 里 Retire.
+      // 此 Sibling 的 unlink 操作由另一个 Worker 进行.
     case BackfixStatus::IS_UNLINKED:
       BUSTUB_ASSERT((sib_header_data->IsLeafPage() && sib_header_data->GetSize() == 0) ||
                         (!sib_header_data->IsLeafPage() && sib_header_data->GetSize() == 0),
